@@ -1,0 +1,33 @@
+# ZERO → ONE backend — Oracle VM systemd unit.
+#
+# Install:
+#   sudo cp deploy/zero-one-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now zero-one-backend
+#
+# Env file (/opt/zero-one/.env) holds PORT/HOST/JWT_SECRET/ALLOWED_ORIGIN etc.
+# (see ../.env.example). The service runs the COMBINED server: built frontend
+# (dist/) + authoritative /api on :5003, fronted by nginx.
+
+[Unit]
+Description=ZERO-ONE authoritative event server (code.scriet)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/zero-one
+ExecStart=/usr/bin/node --import tsx server/standaloneServer.ts
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=5003
+Environment=HOST=127.0.0.1
+# EnvironmentFile loads JWT_SECRET and friends; keep the file chmod 600.
+EnvironmentFile=/opt/zero-one/.env
+# Venue events can burst (auctions, crisis dispatches) — small headroom.
+MemoryMax=512M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

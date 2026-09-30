@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "es2023",
+    // DOM lib is intentional: server/*.ts imports shared src modules
+    // (adminAuthService, mockData) that reference DOM globals inside
+    // client-only code paths. Type-only inclusion — no runtime effect.
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "erasableSyntaxOnly": false,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["vite.config.ts", "server/**/*.ts"]
+}

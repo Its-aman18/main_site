@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PORTS="5001,5002,5173,5174"
+PORTS="5001,5002,5003,5173,5174,5175"
 PIDS=$(lsof -ti tcp:$PORTS || true)
 
 if [ -n "$PIDS" ]; then

@@ -1,0 +1,35 @@
+{
+  "name": "zero-one",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5175 --strictPort",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview --port 5175 --strictPort",
+    "backend": "tsx server/standaloneServer.ts",
+    "start": "node --import tsx server/standaloneServer.ts",
+    "test:engine": "node test_engine.cjs",
+    "test:production": "node test_production_engine.cjs"
+  },
+  "dependencies": {
+    "@types/canvas-confetti": "^1.9.0",
+    "canvas-confetti": "^1.9.4",
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^1.48.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^5.1.1",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.7.0",
+    "typescript": "~6.0.2",
+    "vite": "^7.3.0"
+  }
+}

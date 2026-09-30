@@ -87,6 +87,7 @@ import { formatDateTime, formatTime, getDayOfMonth, getMonthShort } from '@/lib/
 import { processImageUrl } from '@/lib/imageUtils';
 import { getRegistrationStatus } from '@/lib/registrationStatus';
 import { getPlaygroundLaunchUrl } from '@/lib/playgroundUrl';
+import { getZeroOneLaunchUrl } from '@/lib/zeroOneUrl';
 import { normalizeTrustedVideoEmbedUrl } from '@/lib/videoEmbed';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { downloadICS, googleCalendarUrl } from '@/lib/calendar';
@@ -764,16 +765,40 @@ export default function EventDetailPage() {
   const currentSection = isValidActiveSection ? activeSection : 'overview';
 
   // ── Registration / Team / QR action surface (used inside right rail + inline on mobile)
+  // ZERO-ONE entry: events tagged `zero-one` (or slugged zero-one*) redirect
+  // registered participants into the live simulation with an auth handoff.
+  const isZeroOneEvent =
+    event.slug === 'zero-one' ||
+    event.slug.startsWith('zero-one-') ||
+    (event.tags || []).some((tag) => tag.toLowerCase() === 'zero-one');
+
+  const zeroOneEntry =
+    isZeroOneEvent && (isRegistered || acceptedInvitation || myTeam) ? (
+      <a
+        href={getZeroOneLaunchUrl('/')}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block"
+      >
+        <Button className="w-full">
+          Enter Zero-One Event <ExternalLink className="ml-2 h-4 w-4" />
+        </Button>
+      </a>
+    ) : null;
+
   const registrationActions = (() => {
     if (acceptedInvitation) {
       return (
-        <Button
-          onClick={() => { void openQrTicket(); }}
-          className="w-full"
-        >
-          <QrCode className="h-4 w-4 mr-2" />
-          View your QR ticket
-        </Button>
+        <div className="flex flex-col gap-3">
+          {zeroOneEntry}
+          <Button
+            onClick={() => { void openQrTicket(); }}
+            className="w-full"
+          >
+            <QrCode className="h-4 w-4 mr-2" />
+            View your QR ticket
+          </Button>
+        </div>
       );
     }
     if (pendingInvitation) {
@@ -813,6 +838,7 @@ export default function EventDetailPage() {
       if (myTeam) {
         return (
           <div className="flex flex-col gap-3">
+            {zeroOneEntry}
             <TeamDashboard team={myTeam} event={event} onTeamChange={handleTeamChange} />
             <Button onClick={() => { void openQrTicket(); }} className="w-full">
               <QrCode className="h-4 w-4 mr-2" /> View ticket
@@ -822,9 +848,12 @@ export default function EventDetailPage() {
       }
       if (isRegistered) {
         return (
-          <Button onClick={() => { void openQrTicket(); }} className="w-full">
-            <QrCode className="h-4 w-4 mr-2" /> View ticket
-          </Button>
+          <div className="flex flex-col gap-3">
+            {zeroOneEntry}
+            <Button onClick={() => { void openQrTicket(); }} className="w-full">
+              <QrCode className="h-4 w-4 mr-2" /> View ticket
+            </Button>
+          </div>
         );
       }
       if (event.status !== 'PAST' && regStatus.canRegister) {
@@ -860,9 +889,12 @@ export default function EventDetailPage() {
     // Solo registration
     if (isRegistered) {
       return (
-        <Button onClick={() => { void openQrTicket(); }} className="w-full">
-          <QrCode className="h-4 w-4 mr-2" /> View ticket
-        </Button>
+        <div className="flex flex-col gap-3">
+          {zeroOneEntry}
+          <Button onClick={() => { void openQrTicket(); }} className="w-full">
+            <QrCode className="h-4 w-4 mr-2" /> View ticket
+          </Button>
+        </div>
       );
     }
     if (event.status !== 'PAST' && regStatus.canRegister) {

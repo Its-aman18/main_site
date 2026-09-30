@@ -78,6 +78,7 @@ const ALLOWED_CODESCRIET_ORIGINS = [
   'https://www.codescriet.dev',
   'https://api.codescriet.dev',
   'https://code.codescriet.dev',
+  'https://zero-one.codescriet.dev',
   'https://app.codescriet.dev',
 ];
 const SAFE_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);

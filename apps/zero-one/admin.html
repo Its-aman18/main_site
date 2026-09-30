@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f97316" />
+    
+    <!-- Google Fonts: Newsreader, Sora, Outfit, Inter Tight, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,600&family=Outfit:wght@300;400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,600&family=Outfit:wght@300;400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap">
+
+    <!-- Primary SEO Meta Tags -->
+    <title>ZERO → ONE | Admin Control Center • Code.SCRIET</title>
+    <meta name="title" content="ZERO → ONE | Admin Control Center • Code.SCRIET" />
+    <meta name="description" content="Mission Control & Operational Command Center for ZERO → ONE Digital Startup Simulation Platform." />
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://zero-one.codescriet.dev/admin.html" />
+    <meta property="og:title" content="ZERO → ONE | Admin Control Center" />
+    <meta property="og:description" content="Mission Control & Real-Time Event Operations." />
+    <meta property="og:image" content="/logo.png" />
+    
+    <!-- Tailwind CSS CDN for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                orange: '#F97316',
+                brown: '#78350F',
+                amber: '#B45309',
+                yellow: '#F59E0B',
+              }
+            },
+            fontFamily: {
+              serif: ['Newsreader', 'Georgia', 'serif'],
+              heading: ['Sora', 'sans-serif'],
+              sans: ['Outfit', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- Script to set theme immediately and avoid flash -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('codescriet-theme') === 'dark' ? 'dark' : 'light';
+          var root = document.documentElement;
+          root.classList.toggle('dark', theme === 'dark');
+          root.style.colorScheme = theme;
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
+  </head>
+  <body className="bg-[#07080B] text-stone-100 antialiased selection:bg-orange-500 selection:text-white">
+    <div id="admin-root"></div>
+    <script type="module" src="/src/adminMain.tsx"></script>
+  </body>
+</html>

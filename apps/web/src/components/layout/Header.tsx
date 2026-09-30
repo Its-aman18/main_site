@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { cn } from '@/lib/utils';
 import { getPlaygroundLaunchUrl } from '@/lib/playgroundUrl';
+import { getZeroOneLaunchUrl } from '@/lib/zeroOneUrl';
 import { Wordmark } from './Wordmark';
 
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -106,6 +107,7 @@ export function Header() {
     { name: 'Team', href: '/team' },
     { name: 'Achievements', href: '/achievements' },
     ...(settings?.playgroundEnabled !== false ? [{ name: 'Playground', href: getPlaygroundLaunchUrl('/'), external: true }] : []),
+    { name: 'Zero→One', href: getZeroOneLaunchUrl('/'), external: true },
     ...(settings?.showNetwork !== false ? [{ name: 'Network', href: '/network' }] : []),
   ];
 

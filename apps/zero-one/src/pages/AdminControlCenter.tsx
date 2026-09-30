@@ -1,0 +1,1890 @@
+import React, { useState, useEffect } from 'react';
+import { useSimulation } from '../services/simulationContext';
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
+  UserCheck,
+  Clock,
+  Ban,
+  Check,
+  XOctagon,
+  Key,
+  Download,
+  Upload,
+  RefreshCw,
+  Users,
+  ShoppingCart,
+  AlertTriangle,
+  Gavel,
+  Sliders,
+  Tv,
+  Bell,
+  FileCheck,
+  CheckCircle,
+  FileText,
+  DollarSign,
+  Radio,
+  Lock,
+  Plus,
+  Trash2,
+  Edit,
+  ArrowRight,
+  TrendingUp,
+  Search,
+  ExternalLink,
+  ChevronRight,
+  Smartphone,
+  Sparkles,
+} from 'lucide-react';
+import {
+  EventStatus,
+  SimulationRole,
+  MarketItem,
+  CrisisCard,
+  AdminPermissionRole,
+  AdminAuditLogEntry,
+} from '../types';
+import { BOOTSTRAP_ADMIN_EMAIL } from '../services/adminAuthService';
+
+interface AdminControlCenterProps {
+  onNavigate: (view: string) => void;
+  initialTab?: string;
+}
+
+export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
+  onNavigate,
+  initialTab,
+}) => {
+  const {
+    currentUser,
+    eventStatus,
+    setEventStatus,
+    eventConfig,
+    updateEventConfig,
+    serverTimeRemainingSeconds,
+    isClockRunning,
+    toggleClock,
+    resetClock,
+    triggerLockdown,
+    teams,
+    updateTeam,
+    reissueRoleToDevice,
+    ledger,
+    getBalance,
+    manualLedgerAdjustment,
+    grantLoan,
+    marketItems,
+    addMarketItem,
+    updateMarketItem,
+    adjustStock,
+    crisisCards,
+    activeCrisis,
+    addCrisisCard,
+    dispatchCrisisToTeam,
+    extendCrisisTimer,
+    resolveCrisisManually,
+    canvas,
+    artifacts,
+    activeAuction,
+    auctionBids,
+    openAuction,
+    closeAuction,
+    judgingCriteria,
+    updateJudgingCriterion,
+    judgeScores,
+    floorScores,
+    recalculateFloorScores,
+    liveScreenConfig,
+    updateLiveScreenConfig,
+    announcements,
+    addAnnouncement,
+    auditLogs,
+    resetAndReseedSimulation,
+    createSnapshot,
+    restoreSnapshot,
+    // Admin Verification System (Super Admin Controlled)
+    adminAuthorizations,
+    adminAuditLogs,
+    getAdminStatus,
+    isAdminVerified,
+    isSuperAdmin,
+    searchUserByEmail,
+    verifyAdminByEmail,
+    suspendAdmin,
+    revokeAdmin,
+    reactivateAdmin,
+  } = useSimulation();
+
+  const [activeTab, setActiveTab] = useState<string>(initialTab || 'OVERVIEW');
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Sync tab if initialTab prop changes
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Super Admin Verification State
+  const [searchEmailInput, setSearchEmailInput] = useState('');
+  const [isSearchingUser, setIsSearchingUser] = useState(false);
+  const [searchedUser, setSearchedUser] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    accountStatus?: string;
+    role: string;
+    adminStatus: string;
+    adminRole?: string | null;
+  } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [selectedVerifyRole, setSelectedVerifyRole] = useState<AdminPermissionRole>('ADMIN');
+  const [actionLoadingEmail, setActionLoadingEmail] = useState<string | null>(null);
+
+  // Form states
+  const [manualTeamId, setManualTeamId] = useState<string>(teams[0]?.id || 'team-07');
+  const [manualAdjType, setManualAdjType] = useState<'CREDIT' | 'DEBIT'>('CREDIT');
+  const [manualAmount, setManualAmount] = useState<number>(50000);
+  const [manualReason, setManualReason] = useState<string>('Marshal emergency correction');
+
+  const [loanTeamId, setLoanTeamId] = useState<string>(teams[0]?.id || 'team-07');
+  const [loanAmount, setLoanAmount] = useState<number>(200000);
+  const [loanInterest, setLoanInterest] = useState<number>(10);
+
+  const [newAnnTitle, setNewAnnTitle] = useState('');
+  const [newAnnContent, setNewAnnContent] = useState('');
+
+  const [reissueTeamId, setReissueTeamId] = useState<string>('team-07');
+  const [reissueRole, setReissueRole] = useState<SimulationRole>('CFO');
+  const [reissueName, setReissueName] = useState<string>('Priya Sharma');
+
+  const [restoreJsonInput, setRestoreJsonInput] = useState<string>('');
+  const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
+
+  const [auditSearch, setAuditSearch] = useState<string>('');
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleSearchUser = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!searchEmailInput.trim()) {
+      setSearchError('Please enter an email address');
+      return;
+    }
+    setSearchError(null);
+    setIsSearchingUser(true);
+    try {
+      const res = await searchUserByEmail(searchEmailInput.trim());
+      if (res.found && res.user) {
+        setSearchedUser(res.user);
+      } else {
+        setSearchedUser(null);
+        setSearchError(res.error || 'User not found in Code.SCRIET user registry.');
+      }
+    } catch (err: any) {
+      setSearchedUser(null);
+      setSearchError(err.message || 'Failed to search user');
+    } finally {
+      setIsSearchingUser(false);
+    }
+  };
+
+  const handleVerify = async (email: string) => {
+    setActionLoadingEmail(email);
+    const res = await verifyAdminByEmail(email, selectedVerifyRole);
+    setActionLoadingEmail(null);
+    if (res.success) {
+      showToast(res.message);
+      if (searchedUser && searchedUser.email.toLowerCase() === email.toLowerCase()) {
+        setSearchedUser({
+          ...searchedUser,
+          adminStatus: 'ACTIVE',
+          adminRole: selectedVerifyRole,
+        });
+      }
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleSuspend = async (email: string) => {
+    if (email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+      alert('Permanent Super Admin cannot be suspended.');
+      return;
+    }
+    const reason = prompt(`Reason for suspending administrator access for ${email}:`, 'Routine operational audit suspension');
+    if (reason === null) return;
+    setActionLoadingEmail(email);
+    const res = await suspendAdmin(email, reason);
+    setActionLoadingEmail(null);
+    if (res.success) {
+      showToast(res.message);
+      if (searchedUser && searchedUser.email.toLowerCase() === email.toLowerCase()) {
+        setSearchedUser({ ...searchedUser, adminStatus: 'SUSPENDED' });
+      }
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleRevoke = async (email: string) => {
+    if (email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+      alert('Permanent Super Admin cannot be revoked.');
+      return;
+    }
+    const confirm = window.confirm(`Are you sure you want to REVOKE administrator access for ${email}?`);
+    if (!confirm) return;
+    const reason = prompt(`Reason for revoking admin access for ${email}:`, 'Role decommission / competition conflict');
+    if (reason === null) return;
+    setActionLoadingEmail(email);
+    const res = await revokeAdmin(email, reason);
+    setActionLoadingEmail(null);
+    if (res.success) {
+      showToast(res.message);
+      if (searchedUser && searchedUser.email.toLowerCase() === email.toLowerCase()) {
+        setSearchedUser({ ...searchedUser, adminStatus: 'REVOKED' });
+      }
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleReactivate = async (email: string) => {
+    const reason = prompt(`Reason for reactivating administrator access for ${email}:`, 'Privileges reinstated by Super Admin');
+    if (reason === null) return;
+    setActionLoadingEmail(email);
+    const res = await reactivateAdmin(email, reason);
+    setActionLoadingEmail(null);
+    if (res.success) {
+      showToast(res.message);
+      if (searchedUser && searchedUser.email.toLowerCase() === email.toLowerCase()) {
+        setSearchedUser({ ...searchedUser, adminStatus: 'ACTIVE' });
+      }
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleStateAdvance = (next: EventStatus) => {
+    setEventStatus(next);
+    showToast(`Event status updated to: ${next}`);
+  };
+
+  const handleExportJSON = () => {
+    const data = createSnapshot();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zero-one-snapshot-${new Date().toISOString()}.json`;
+    a.click();
+    showToast('Authoritative JSON snapshot downloaded.');
+  };
+
+  const handleExportCSV = () => {
+    let csv = 'TeamCode,TeamName,Capital,HealthScore,CurrentRound,Status\n';
+    teams.forEach((t) => {
+      csv += `"${t.teamCode}","${t.name}",${getBalance(t.id)},${t.healthScore},"${t.currentRound}","${t.status}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zero-one-teams-summary-${new Date().toISOString()}.csv`;
+    a.click();
+    showToast('Teams CSV exported successfully.');
+  };
+
+  const handleManualAdjustmentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    manualLedgerAdjustment(manualTeamId, manualAdjType, manualAmount, manualReason);
+    showToast(`Applied ${manualAdjType} of ₹${manualAmount.toLocaleString('en-IN')} to ${manualTeamId}`);
+  };
+
+  const handleLoanSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    grantLoan(loanTeamId, loanAmount, loanInterest);
+    showToast(`Disbursed ₹${loanAmount.toLocaleString('en-IN')} loan to ${loanTeamId}`);
+  };
+
+  const handleAnnouncementSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAnnTitle) return;
+    addAnnouncement(newAnnTitle, newAnnContent, 'ALERT');
+    setNewAnnTitle('');
+    setNewAnnContent('');
+    showToast('Announcement broadcasted room-wide!');
+  };
+
+  const handleReissueRole = (e: React.FormEvent) => {
+    e.preventDefault();
+    reissueRoleToDevice(reissueTeamId, reissueRole, reissueName);
+    showToast(`Role ${reissueRole} reissued to ${reissueName} for ${reissueTeamId}`);
+  };
+
+  const handleRestoreSubmit = () => {
+    if (!restoreJsonInput) return;
+    const ok = restoreSnapshot(restoreJsonInput);
+    if (ok) {
+      showToast('Event snapshot restored successfully!');
+      setShowRestoreModal(false);
+      setRestoreJsonInput('');
+    } else {
+      showToast('Failed to parse snapshot JSON.');
+    }
+  };
+
+  const filteredLogs = auditLogs.filter(
+    (l) =>
+      l.action.toLowerCase().includes(auditSearch.toLowerCase()) ||
+      l.details.toLowerCase().includes(auditSearch.toLowerCase()) ||
+      l.actor.toLowerCase().includes(auditSearch.toLowerCase()) ||
+      l.target.toLowerCase().includes(auditSearch.toLowerCase())
+  );
+
+  return (
+    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 flex transition-colors">
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-2xl bg-stone-900 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Left Admin Navigation Sidebar matching Screenshot 7 */}
+      <aside className="w-64 border-r border-[#EFE8DD] dark:border-[#202432] bg-[#FAF8F5] dark:bg-[#0A0C14] hidden md:flex flex-col justify-between p-4 flex-shrink-0">
+        <div className="space-y-1">
+          {/* Main Dashboard Link */}
+          <button
+            onClick={() => onNavigate('team-dashboard')}
+            className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Dashboard</span>
+          </button>
+
+          {/* Active ZERO -> ONE Header Bar matching Screenshot 7 */}
+          <div className="pt-2 pb-1">
+            <div className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-orange-500 text-white shadow-sm flex items-center justify-between">
+              <span>ZERO → ONE</span>
+              <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded">Active</span>
+            </div>
+          </div>
+
+          {/* Submenu Links matching Screenshot 7 */}
+          <div className="space-y-0.5 pt-1 text-xs font-medium text-stone-600 dark:text-stone-400">
+            <button
+              onClick={() => setActiveTab('OVERVIEW')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'OVERVIEW' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5 text-stone-400" />
+              <span>Overview</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('EVENT_CONTROL')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'EVENT_CONTROL' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5 text-stone-400" />
+              <span>Event Control</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('TEAMS')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'TEAMS' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-stone-400" />
+              <span>Teams & Roles</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('FINANCE')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'FINANCE' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5 text-stone-400" />
+              <span>Virtual Finance & Loans</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('MARKET')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'MARKET' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5 text-stone-400" />
+              <span>Market Management</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('CRISIS')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'CRISIS' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-stone-400" />
+              <span>Crisis Engine</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('AUCTION')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'AUCTION' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Gavel className="w-3.5 h-3.5 text-stone-400" />
+              <span>Auction & Trading</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('CANVAS')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'CANVAS' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-stone-400" />
+              <span>Canvas Submissions</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('ARTIFACTS')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'ARTIFACTS' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <FileCheck className="w-3.5 h-3.5 text-stone-400" />
+              <span>Prototypes & Decks</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('JUDGES')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'JUDGES' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Gavel className="w-3.5 h-3.5 text-stone-400" />
+              <span>Judges & Scoring</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('LIVE_SCREEN')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'LIVE_SCREEN' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Tv className="w-3.5 h-3.5 text-stone-400" />
+              <span>Live Screen Control</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('ANNOUNCEMENTS')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'ANNOUNCEMENTS' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5 text-stone-400" />
+              <span>Announcements</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('AUDIT')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'AUDIT' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-stone-400" />
+              <span>Audit Logs</span>
+            </button>
+
+            {isSuperAdmin() && (
+              <button
+                id="sidebar-admin-verification-tab"
+                onClick={() => setActiveTab('ADMIN_VERIFICATION')}
+                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors ${
+                  activeTab === 'ADMIN_VERIFICATION' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />
+                  <span>Admin Verification</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-500/20 text-orange-400 font-mono">
+                  SUPER
+                </span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setActiveTab('BACKUP')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+                activeTab === 'BACKUP' ? 'bg-orange-500/10 text-orange-600 font-bold' : 'hover:bg-stone-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              <Download className="w-3.5 h-3.5 text-stone-400" />
+              <span>Export & Backup</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Emergency Rehearsal Reset Button at bottom */}
+        <div className="pt-4 border-t border-stone-200 dark:border-stone-800">
+          <button
+            onClick={() => setResetConfirmOpen(true)}
+            className="w-full py-2.5 px-3 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset & Reseed Simulation</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Admin Workspace Area */}
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
+        {/* Title Header matching Screenshot 7 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-black font-heading tracking-tight text-stone-900 dark:text-stone-100">
+                ZERO → ONE Control Center
+              </h1>
+              <span className="badge badge-orange text-[10px]">Real-time Engine</span>
+            </div>
+            <p className="text-xs text-stone-500 mt-1">
+              Authoritative Master Event Operations • Code.SCRIET Central Ecosystem
+            </p>
+          </div>
+
+          {/* Official Clock and Action Bar */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs font-mono font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>State: {eventStatus}</span>
+            </div>
+
+            <div className="px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-600 font-mono font-bold text-xs">
+              {Math.floor(serverTimeRemainingSeconds / 60)}:{(serverTimeRemainingSeconds % 60).toString().padStart(2, '0')}
+            </div>
+
+            <button
+              onClick={toggleClock}
+              title={isClockRunning ? 'Pause official clock' : 'Resume official clock'}
+              className={`p-2 rounded-full border ${
+                isClockRunning ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+              }`}
+            >
+              {isClockRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* TAB: OVERVIEW (Tiles matching Screenshot 7) */}
+        {/* ========================================================================= */}
+        {activeTab === 'OVERVIEW' && (
+          <div className="space-y-6">
+            {/* 6 Large Control Center Tiles matching Screenshot 7 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Tile 1: Event Control */}
+              <div
+                onClick={() => setActiveTab('EVENT_CONTROL')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Play className="w-6 h-6 fill-current" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Event Control
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Manage event state & rounds
+                </p>
+              </div>
+
+              {/* Tile 2: Teams & Roles */}
+              <div
+                onClick={() => setActiveTab('TEAMS')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Users className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Teams & Roles
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  View and manage teams
+                </p>
+              </div>
+
+              {/* Tile 3: Market Management */}
+              <div
+                onClick={() => setActiveTab('MARKET')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Market Management
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Items, pricing and stock
+                </p>
+              </div>
+
+              {/* Tile 4: Crisis Engine */}
+              <div
+                onClick={() => setActiveTab('CRISIS')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Crisis Engine
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Create and dispatch crises
+                </p>
+              </div>
+
+              {/* Tile 5: Auction & Trading */}
+              <div
+                onClick={() => setActiveTab('AUCTION')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Gavel className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Auction & Trading
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Manage auctions and trades
+                </p>
+              </div>
+
+              {/* Tile 6: Judging & Scoring */}
+              <div
+                onClick={() => setActiveTab('JUDGES')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <FileCheck className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Judging & Scoring
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Manage judges and scores
+                </p>
+              </div>
+
+              {/* Tile 7: Live Screen */}
+              <div
+                onClick={() => onNavigate('live-screen')}
+                className="card card-interactive p-6 space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Tv className="w-6 h-6" />
+                </div>
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Live Screen
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Control what participants see
+                </p>
+              </div>
+
+              {/* Tile 8: Admin Verification (Super Admin Only) */}
+              {isSuperAdmin() && (
+                <div
+                  id="tile-admin-verification"
+                  onClick={() => setActiveTab('ADMIN_VERIFICATION')}
+                  className="card card-interactive p-6 space-y-3 group border border-orange-500/30 hover:border-orange-500 transition-colors"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                      Admin Verification
+                    </h3>
+                    <span className="badge badge-orange text-[10px]">
+                      SUPER ADMIN
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Verify administrators by Code.SCRIET email ID and manage authorization
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Live Telemetry Strip */}
+            <div className="card p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <span className="text-[11px] font-bold text-stone-400 uppercase">Teams Competing</span>
+                <div className="text-xl font-black font-mono mt-0.5">{teams.length} Squads</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-stone-400 uppercase">Total Capital in Play</span>
+                <div className="text-xl font-black font-mono text-emerald-600 mt-0.5">
+                  ₹{teams.reduce((acc, t) => acc + getBalance(t.id), 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-stone-400 uppercase">Market Scarcity Stock</span>
+                <div className="text-xl font-black font-mono text-orange-600 mt-0.5">
+                  {marketItems.reduce((acc, i) => acc + i.stockRemaining, 0)} Units Left
+                </div>
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-stone-400 uppercase">Audit Mutations</span>
+                <div className="text-xl font-black font-mono mt-0.5">{auditLogs.length} Events</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: EVENT CONTROL */}
+        {/* ========================================================================= */}
+        {activeTab === 'EVENT_CONTROL' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Authoritative State Machine & Progression
+              </h3>
+              <p className="text-xs text-stone-500">
+                The server authoritatively broadcasts state changes to all connected devices.
+              </p>
+
+              <div className="flex flex-wrap gap-2 pt-2">
+                {[
+                  'SETUP',
+                  'LOBBY',
+                  'ONBOARDING',
+                  'BRIEF',
+                  'ROUND_1',
+                  'MARKET_SHOCK',
+                  'ROUND_2',
+                  'FIRESIDE',
+                  'AUCTION',
+                  'ROUND_3',
+                  'LOCKDOWN',
+                  'QUALIFIERS',
+                  'DELIBERATION',
+                  'FINALS',
+                  'REVEAL',
+                  'ARCHIVED',
+                ].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => handleStateAdvance(st as EventStatus)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                      eventStatus === st
+                        ? 'bg-orange-500 text-white shadow-md'
+                        : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200'
+                    }`}
+                  >
+                    {st.replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-stone-100 dark:border-stone-800 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => resetClock(25)}
+                  className="btn-secondary py-2 px-4 text-xs font-bold"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset Round Clock (25 Min)
+                </button>
+                <button
+                  onClick={() => resetClock(10)}
+                  className="btn-secondary py-2 px-4 text-xs font-bold"
+                >
+                  Set 10 Min Warning
+                </button>
+                <button
+                  onClick={triggerLockdown}
+                  className="btn-danger py-2 px-4 text-xs font-bold ml-auto"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  Trigger 60s Room Lockdown
+                </button>
+              </div>
+            </div>
+
+            {/* Broadcast Announcement Bar */}
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Broadcast Live Announcement
+              </h3>
+              <form onSubmit={handleAnnouncementSubmit} className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Announcement Title (e.g. Market Restock Active)"
+                  value={newAnnTitle}
+                  onChange={(e) => setNewAnnTitle(e.target.value)}
+                  className="w-full text-xs"
+                  required
+                />
+                <textarea
+                  rows={2}
+                  placeholder="Content details broadcasted immediately to all participant devices and live screen..."
+                  value={newAnnContent}
+                  onChange={(e) => setNewAnnContent(e.target.value)}
+                  className="w-full text-xs resize-none"
+                />
+                <button type="submit" className="btn-primary py-2 px-6 text-xs font-bold">
+                  Broadcast to All Teams
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: TEAMS & ROLES */}
+        {/* ========================================================================= */}
+        {activeTab === 'TEAMS' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Hardware Role Reissue Recovery Panel (Rule 14 & Rule 54) */}
+            <div className="card p-6 space-y-3 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-orange-500" />
+                <h3 className="font-heading font-bold text-sm text-stone-900 dark:text-stone-100">
+                  Administrative Device Role Reissuance
+                </h3>
+              </div>
+              <p className="text-xs text-stone-500">
+                In case of lost phone, dead battery, or device swap, revoke old token and bind role to new device.
+              </p>
+              <form onSubmit={handleReissueRole} className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
+                <select
+                  value={reissueTeamId}
+                  onChange={(e) => setReissueTeamId(e.target.value)}
+                  className="text-xs"
+                >
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.teamCode} ({t.name})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={reissueRole}
+                  onChange={(e) => setReissueRole(e.target.value as SimulationRole)}
+                  className="text-xs"
+                >
+                  <option value="CEO">CEO</option>
+                  <option value="CFO">CFO</option>
+                  <option value="CTO">CTO</option>
+                  <option value="CMO">CMO</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Student Name"
+                  value={reissueName}
+                  onChange={(e) => setReissueName(e.target.value)}
+                  className="text-xs"
+                  required
+                />
+                <button type="submit" className="btn-primary py-2 px-4 text-xs font-bold">
+                  Reissue & Revoke Old
+                </button>
+              </form>
+            </div>
+
+            {/* Teams Roster */}
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Team Rosters & Health Status ({teams.length} Registered)
+              </h3>
+              <div className="divide-y divide-stone-100 dark:divide-stone-800">
+                {teams.map((t) => (
+                  <div key={t.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-stone-900 dark:text-stone-100">
+                          {t.name}
+                        </span>
+                        <span className="badge badge-amber text-[10px] font-mono">
+                          {t.teamCode}
+                        </span>
+                        <span
+                          className={`badge text-[10px] ${
+                            t.status === 'ACTIVE' ? 'badge-green' : 'badge-red'
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </div>
+                      <div className="text-xs text-stone-400">
+                        Capital: ₹{getBalance(t.id).toLocaleString('en-IN')} • Health: {t.healthScore}% • Problem: {t.problemStatement}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 text-[11px] pt-1">
+                        {t.members.map((m) => (
+                          <span
+                            key={m.id}
+                            className="px-2 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 font-mono"
+                          >
+                            {m.role}: {m.displayName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const nextStatus = t.status === 'ACTIVE' ? 'FROZEN' : 'ACTIVE';
+                          updateTeam(t.id, { status: nextStatus });
+                          showToast(`Team ${t.name} status updated to: ${nextStatus}`);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold border border-stone-200 dark:border-stone-700 hover:border-orange-500"
+                      >
+                        {t.status === 'ACTIVE' ? 'Freeze Squad' : 'Unfreeze'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: VIRTUAL FINANCE & LOANS */}
+        {/* ========================================================================= */}
+        {activeTab === 'FINANCE' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Manual Emergency Ledger Adjustment (Rule 83) */}
+            <div className="card p-6 space-y-4 border-2 border-amber-500/20">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-amber-500" />
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Emergency Administrative Ledger Mutation
+                </h3>
+              </div>
+              <p className="text-xs text-stone-500">
+                Rule 83: All emergency adjustments require an explicit reason and are permanently committed to the append-only ledger and audit log.
+              </p>
+
+              <form onSubmit={handleManualAdjustmentSubmit} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <select
+                  value={manualTeamId}
+                  onChange={(e) => setManualTeamId(e.target.value)}
+                  className="text-xs"
+                >
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.teamCode} ({t.name})
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={manualAdjType}
+                  onChange={(e) => setManualAdjType(e.target.value as 'CREDIT' | 'DEBIT')}
+                  className="text-xs font-bold"
+                >
+                  <option value="CREDIT">CREDIT (+)</option>
+                  <option value="DEBIT">DEBIT (-)</option>
+                </select>
+
+                <input
+                  type="number"
+                  step={5000}
+                  value={manualAmount}
+                  onChange={(e) => setManualAmount(Number(e.target.value))}
+                  placeholder="Amount (₹)"
+                  className="text-xs font-mono font-bold"
+                  required
+                />
+
+                <input
+                  type="text"
+                  value={manualReason}
+                  onChange={(e) => setManualReason(e.target.value)}
+                  placeholder="Mandatory Audit Reason"
+                  className="text-xs"
+                  required
+                />
+
+                <div className="sm:col-span-4 pt-1">
+                  <button type="submit" className="btn-primary py-2 px-6 text-xs font-bold">
+                    Commit Ledger Adjustment
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Grant Bridge Loan (Rule 32) */}
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Disburse Founder Bridge Loan
+              </h3>
+              <p className="text-xs text-stone-500">
+                Configures operational credit infusions with interest penalties.
+              </p>
+
+              <form onSubmit={handleLoanSubmit} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <select
+                  value={loanTeamId}
+                  onChange={(e) => setLoanTeamId(e.target.value)}
+                  className="text-xs"
+                >
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.teamCode} ({t.name})
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  step={10000}
+                  value={loanAmount}
+                  onChange={(e) => setLoanAmount(Number(e.target.value))}
+                  placeholder="Loan Principal (₹)"
+                  className="text-xs font-mono font-bold"
+                  required
+                />
+
+                <input
+                  type="number"
+                  value={loanInterest}
+                  onChange={(e) => setLoanInterest(Number(e.target.value))}
+                  placeholder="Interest Rate (%)"
+                  className="text-xs font-mono font-bold"
+                  required
+                />
+
+                <div className="sm:col-span-3 pt-1">
+                  <button type="submit" className="btn-primary py-2 px-6 text-xs font-bold">
+                    Disburse Loan to Squad
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: MARKET MANAGEMENT */}
+        {/* ========================================================================= */}
+        {activeTab === 'MARKET' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Dynamic Pricing Toggle & Demand Algorithm Controls */}
+            <div className="card p-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                    Dynamic Pricing & Global Scarcity Engine
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Prices automatically fluctuate based on aggregate room purchase volume.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = !eventConfig.dynamicPricingEnabled;
+                    updateEventConfig({ dynamicPricingEnabled: next });
+                    showToast(`Dynamic pricing ${next ? 'enabled' : 'disabled'}`);
+                  }}
+                  className={`px-4 py-2 rounded-full text-xs font-bold ${
+                    eventConfig.dynamicPricingEnabled
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-stone-200 dark:bg-stone-800 text-stone-600'
+                  }`}
+                >
+                  Dynamic Pricing: {eventConfig.dynamicPricingEnabled ? 'ACTIVE' : 'OFF'}
+                </button>
+              </div>
+            </div>
+
+            {/* Items Registry Table with in-place stock and price controls */}
+            <div className="card overflow-hidden shadow-lg border border-stone-200 dark:border-stone-800">
+              <div className="p-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
+                <h4 className="font-heading font-extrabold text-sm">
+                  Active Market Registry ({marketItems.length} SKUs)
+                </h4>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 font-bold uppercase text-stone-500">
+                      <th className="py-3 px-4">Item SKU</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Current Price</th>
+                      <th className="py-3 px-4">Stock Left</th>
+                      <th className="py-3 px-4 text-center">Quick Stock Adjust</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+                    {marketItems.map((item) => (
+                      <tr key={item.sku} className="hover:bg-stone-50/50 dark:hover:bg-stone-900/40">
+                        <td className="py-3 px-4 font-bold text-stone-900 dark:text-stone-100">
+                          {item.name}
+                          <span className="block text-[10px] text-stone-400 font-mono">{item.sku}</span>
+                        </td>
+                        <td className="py-3 px-4 text-stone-500">{item.category}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-stone-800 dark:text-stone-200">
+                          ₹{item.currentPrice.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-4 font-mono font-bold">
+                          <span className={item.stockRemaining <= 2 ? 'text-red-500' : 'text-stone-800 dark:text-stone-200'}>
+                            {item.stockRemaining} / {item.stockTotal}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => adjustStock(item.sku, 1)}
+                              className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 hover:bg-emerald-600 hover:text-white font-bold"
+                            >
+                              +1
+                            </button>
+                            <button
+                              onClick={() => adjustStock(item.sku, 5)}
+                              className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 hover:bg-emerald-600 hover:text-white font-bold"
+                            >
+                              +5
+                            </button>
+                            <button
+                              onClick={() => adjustStock(item.sku, -1)}
+                              className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 hover:bg-red-600 hover:text-white font-bold"
+                            >
+                              -1
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: CRISIS ENGINE */}
+        {/* ========================================================================= */}
+        {activeTab === 'CRISIS' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Active Crisis Dispatch Control */}
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Dispatch Market Shock to Teams
+              </h3>
+              <p className="text-xs text-stone-500">
+                Immediately launches high-attention crisis modal and synchronized countdown timer on targeted devices.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                {crisisCards.map((card) => (
+                  <div
+                    key={card.id}
+                    className="p-4 rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 space-y-2 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="badge badge-red text-[10px]">{card.severity}</span>
+                        <span className="text-[10px] text-stone-400 font-mono">{card.category}</span>
+                      </div>
+                      <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100">{card.title}</h4>
+                      <p className="text-xs text-stone-500 line-clamp-2 mt-1">{card.description}</p>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        dispatchCrisisToTeam('team-07', card.id);
+                        showToast(`Dispatched ${card.title} to Team InnovateX`);
+                      }}
+                      className="btn-danger w-full py-2 text-xs font-bold mt-3"
+                    >
+                      Dispatch Shock →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Active Crisis Monitor */}
+            {activeCrisis && (
+              <div className="card p-6 space-y-3 border-2 border-red-500/30">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-sm text-red-600 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" />
+                    Active Crisis on {activeCrisis.teamId}: {activeCrisis.crisis.title}
+                  </h4>
+                  <span className="text-xs font-bold text-stone-400">
+                    Status: {activeCrisis.status}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      extendCrisisTimer(120);
+                      showToast('Extended crisis timer by 2 minutes');
+                    }}
+                    className="btn-secondary py-1.5 px-4 text-xs font-bold"
+                  >
+                    +2 Min Timer Extension
+                  </button>
+                  <button
+                    onClick={() => {
+                      resolveCrisisManually(activeCrisis.teamId, 'Approved by Event Operator');
+                      showToast('Crisis marked resolved');
+                    }}
+                    className="btn-primary py-1.5 px-4 text-xs font-bold"
+                  >
+                    Mark Manually Resolved
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: AUCTION & TRADING */}
+        {/* ========================================================================= */}
+        {activeTab === 'AUCTION' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="card p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Sealed-Bid Auction Desk
+              </h3>
+              <p className="text-xs text-stone-500">
+                Teams submit private sealed bids. The highest bid atomically wins and is debited upon closing.
+              </p>
+
+              {activeAuction ? (
+                <div className="p-4 rounded-2xl bg-stone-100 dark:bg-stone-900 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-sm text-stone-900 dark:text-stone-100">
+                      {activeAuction.title}
+                    </span>
+                    <span className="badge badge-amber text-[10px]">
+                      {activeAuction.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-stone-500">
+                    Min Reserve: ₹{activeAuction.minimumBid.toLocaleString('en-IN')} • Submitted Bids: {auctionBids.length}
+                  </div>
+
+                  {/* Bids inspector */}
+                  <div className="space-y-1.5 pt-2">
+                    <div className="text-xs font-bold uppercase text-stone-400">Received Sealed Bids:</div>
+                    {auctionBids.map((b) => (
+                      <div key={b.id} className="text-xs font-mono flex justify-between bg-white dark:bg-[#12141C] p-2 rounded-xl">
+                        <span>{b.teamName} ({b.teamId})</span>
+                        <span className="font-bold text-orange-600">₹{b.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {activeAuction.status === 'OPEN' && (
+                    <button
+                      onClick={() => {
+                        const res = closeAuction();
+                        showToast(`Auction closed! Winner: ${res.winnerTeamName || 'None'} @ ₹${res.winningBid || 0}`);
+                      }}
+                      className="btn-primary py-2 px-6 text-xs font-bold"
+                    >
+                      Close Auction & Commit Winner
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-stone-400">No active auction.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: JUDGES & SCORING */}
+        {/* ========================================================================= */}
+        {activeTab === 'JUDGES' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Criteria weights editor */}
+            <div className="card p-6 space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  Official Judging Criteria Weights (Rule 46)
+                </h3>
+                <button
+                  onClick={() => {
+                    recalculateFloorScores();
+                    showToast('Recalculated objective floor metrics across all squads!');
+                  }}
+                  className="btn-secondary py-1.5 px-4 text-xs font-bold"
+                >
+                  Recalculate Automated Floor Scores
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {judgingCriteria.map((crit) => (
+                  <div key={crit.id} className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs">
+                    <span className="font-bold text-stone-800 dark:text-stone-200">{crit.name}</span>
+                    <span className="font-mono font-bold text-orange-600">Max: {crit.maxScore} pts</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Submitted Judge Scores Table */}
+            <div className="card p-6 space-y-3">
+              <h4 className="font-heading font-extrabold text-sm">
+                Submitted Human Judge Evaluations ({judgeScores.length})
+              </h4>
+              <div className="space-y-2">
+                {judgeScores.map((js) => (
+                  <div key={js.id} className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs flex justify-between items-center">
+                    <div>
+                      <span className="font-bold text-stone-900 dark:text-stone-100">{js.judgeName}</span>
+                      <span className="text-stone-400 ml-2">evaluated Team {js.teamId}</span>
+                      <p className="text-stone-500 italic mt-0.5">"{js.feedback}"</p>
+                    </div>
+                    <span className="text-lg font-black font-mono text-orange-600">
+                      {js.totalScore} / 100
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: AUDIT LOGS */}
+        {/* ========================================================================= */}
+        {activeTab === 'AUDIT' && (
+          <div className="card p-6 space-y-4 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                Authoritative Audit Stream ({auditLogs.length} Records)
+              </h3>
+              <div className="relative max-w-xs w-full">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter actions or targets..."
+                  value={auditSearch}
+                  onChange={(e) => setAuditSearch(e.target.value)}
+                  className="w-full text-xs pl-9 pr-3 py-1.5"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-96 overflow-y-auto space-y-2 font-mono text-xs">
+              {filteredLogs.map((log) => (
+                <div
+                  key={log.id}
+                  className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-100 dark:border-stone-800 flex items-start justify-between gap-4"
+                >
+                  <div>
+                    <span className="font-bold text-orange-600 dark:text-orange-400">
+                      [{log.action}]
+                    </span>{' '}
+                    <span className="text-stone-500 text-[11px]">({log.actor} • {log.role})</span>
+                    <div className="text-stone-700 dark:text-stone-300 mt-0.5 font-sans text-xs">
+                      {log.details}
+                    </div>
+                  </div>
+                  <span className="text-stone-400 text-[10px] flex-shrink-0">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: ADMIN VERIFICATION (SUPER ADMIN ONLY) */}
+        {/* ========================================================================= */}
+        {activeTab === 'ADMIN_VERIFICATION' && (
+          <div className="space-y-6 animate-in fade-in duration-150">
+            {!isSuperAdmin() ? (
+              <div className="card p-8 text-center space-y-4 border-amber-500/30">
+                <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                  <ShieldAlert className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-black font-heading text-stone-900 dark:text-stone-100">
+                  Super Admin Authority Required
+                </h2>
+                <p className="text-xs text-stone-500 max-w-md mx-auto">
+                  Admin verification is strictly restricted to the primary bootstrap Super Administrator ({BOOTSTRAP_ADMIN_EMAIL}). Standard administrators cannot verify, suspend, or revoke other administrators.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* 1. Header Card */}
+                <div className="card p-6 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-2xl font-black font-heading text-stone-900 dark:text-stone-100">
+                        ADMIN VERIFICATION
+                      </h2>
+                      <span className="badge badge-orange text-[10px] font-mono">
+                        SUPER ADMIN EXCLUSIVE
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono text-stone-400">
+                      Bootstrap Account: {BOOTSTRAP_ADMIN_EMAIL}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500">
+                    Verify Code.SCRIET users as active administrators by email address. Manage authorization status (Active, Suspended, Revoked).
+                  </p>
+                </div>
+
+                {/* 2. Search Code.SCRIET User Card */}
+                <div className="card p-6 space-y-4">
+                  <h3 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                    Search Code.SCRIET User
+                  </h3>
+                  <form onSubmit={handleSearchUser} className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        id="input-search-admin-email"
+                        type="email"
+                        placeholder="Enter Email Address (e.g. student@example.com)"
+                        value={searchEmailInput}
+                        onChange={(e) => setSearchEmailInput(e.target.value)}
+                        className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    <button
+                      id="btn-search-user"
+                      type="submit"
+                      disabled={isSearchingUser}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {isSearchingUser ? <Clock className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      <span>SEARCH USER</span>
+                    </button>
+                  </form>
+
+                  {/* Search Error Alert */}
+                  {searchError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{searchError}</span>
+                    </div>
+                  )}
+
+                  {/* USER RESULT CARD */}
+                  {searchedUser && (
+                    <div className="mt-4 p-5 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-800">
+                        <span className="font-heading font-black text-xs uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                          USER RESULT
+                        </span>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          Verified Code.SCRIET Member
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Name:</span>
+                          <span className="font-bold text-stone-900 dark:text-stone-100 text-sm">
+                            {searchedUser.name}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Email:</span>
+                          <span className="font-bold font-mono text-stone-800 dark:text-stone-200">
+                            {searchedUser.email}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Code.SCRIET User ID:</span>
+                          <span className="font-mono text-stone-600 dark:text-stone-400 text-[11px]">
+                            {searchedUser.id}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Current Role:</span>
+                          <span className="font-bold text-stone-800 dark:text-stone-200">
+                            {searchedUser.role}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Admin Status:</span>
+                          <span
+                            className={`font-bold px-2 py-0.5 rounded text-[10px] uppercase inline-block ${
+                              searchedUser.adminStatus === 'ACTIVE'
+                                ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                                : searchedUser.adminStatus === 'SUSPENDED'
+                                ? 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
+                                : searchedUser.adminStatus === 'REVOKED'
+                                ? 'bg-red-500/15 text-red-600 border border-red-500/30'
+                                : 'bg-stone-500/15 text-stone-500 border border-stone-500/30'
+                            }`}
+                          >
+                            {searchedUser.adminStatus === 'ACTIVE'
+                              ? `VERIFIED ADMIN (${searchedUser.adminRole || 'ADMIN'})`
+                              : searchedUser.adminStatus === 'SUSPENDED'
+                              ? 'SUSPENDED ADMIN'
+                              : searchedUser.adminStatus === 'REVOKED'
+                              ? 'REVOKED ADMIN'
+                              : 'NOT VERIFIED'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-stone-400 block text-[11px]">Grant Role:</span>
+                          <select
+                            value={selectedVerifyRole}
+                            onChange={(e) => setSelectedVerifyRole(e.target.value as AdminPermissionRole)}
+                            className="text-xs p-1.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 font-bold"
+                          >
+                            <option value="ADMIN">ADMIN (Full Simulator Ops)</option>
+                            <option value="EVENT_ADMIN">EVENT_ADMIN (Scarcity & Crisis)</option>
+                            <option value="EVENT_OPERATOR">EVENT_OPERATOR (Floor Ops)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-stone-200 dark:border-stone-800 flex items-center justify-end gap-3">
+                        <button
+                          id="btn-verify-admin"
+                          onClick={() => handleVerify(searchedUser.email)}
+                          disabled={actionLoadingEmail === searchedUser.email}
+                          className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>{searchedUser.adminStatus === 'ACTIVE' ? 'UPDATE / RE-VERIFY ADMIN' : 'VERIFY ADMIN'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. VERIFIED ADMINS Card */}
+                <div className="card p-6 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-800">
+                    <div>
+                      <h3 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                        VERIFIED ADMINS
+                      </h3>
+                      <p className="text-xs text-stone-500">
+                        Authoritative administrator accounts recognized by server
+                      </p>
+                    </div>
+                    <span className="badge badge-orange text-[10px] font-mono">
+                      {adminAuthorizations.filter((a) => a.status === 'ACTIVE' || a.active).length} Active Admins
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-stone-200 dark:border-stone-800 text-stone-400 font-semibold uppercase text-[10px]">
+                          <th className="py-2.5 px-3">Name</th>
+                          <th className="py-2.5 px-3">Email</th>
+                          <th className="py-2.5 px-3">Role</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3">Verified By</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-200 dark:divide-stone-800">
+                        {adminAuthorizations.map((auth) => {
+                          const isMaster = auth.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+                          const isActive = auth.status === 'ACTIVE' || (auth.active && auth.status !== 'SUSPENDED' && auth.status !== 'REVOKED');
+                          const isSuspended = auth.status === 'SUSPENDED';
+                          const isRevoked = auth.status === 'REVOKED';
+
+                          return (
+                            <tr key={auth.id} className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50 transition-colors">
+                              <td className="py-3 px-3 font-bold text-stone-900 dark:text-stone-100">
+                                {auth.name}
+                                {isMaster && (
+                                  <span className="ml-2 text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-500 font-bold">
+                                    PRIMARY BOOTSTRAP
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 font-mono text-stone-700 dark:text-stone-300">
+                                {auth.email}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-bold text-stone-800 dark:text-stone-200">
+                                  {auth.role}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    isActive
+                                      ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                                      : isSuspended
+                                      ? 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
+                                      : 'bg-stone-500/15 text-stone-400 border border-stone-500/30'
+                                  }`}
+                                >
+                                  {auth.status || (isActive ? 'ACTIVE' : 'INACTIVE')}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-[11px] text-stone-500 truncate max-w-[140px]">
+                                {auth.verifiedBy || 'SYSTEM'}
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                {isMaster ? (
+                                  <span className="text-[10px] text-stone-400 font-mono italic">
+                                    Permanent Super Admin
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {/* Suspend Action */}
+                                    {isActive && (
+                                      <button
+                                        id={`btn-suspend-admin-${auth.email}`}
+                                        onClick={() => handleSuspend(auth.email)}
+                                        disabled={actionLoadingEmail === auth.email}
+                                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 transition-colors"
+                                      >
+                                        Suspend
+                                      </button>
+                                    )}
+
+                                    {/* Reactivate Action */}
+                                    {(isSuspended || isRevoked) && (
+                                      <button
+                                        id={`btn-reactivate-admin-${auth.email}`}
+                                        onClick={() => handleReactivate(auth.email)}
+                                        disabled={actionLoadingEmail === auth.email}
+                                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 transition-colors"
+                                      >
+                                        Reactivate
+                                      </button>
+                                    )}
+
+                                    {/* Revoke Action */}
+                                    {!isRevoked && (
+                                      <button
+                                        id={`btn-revoke-admin-${auth.email}`}
+                                        onClick={() => handleRevoke(auth.email)}
+                                        disabled={actionLoadingEmail === auth.email}
+                                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-stone-200 dark:bg-stone-800 hover:bg-red-500/20 hover:text-red-500 text-stone-600 dark:text-stone-400 transition-colors"
+                                      >
+                                        Revoke
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 4. AUTHORIZATION AUDIT LOG */}
+                <div className="card p-6 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-800">
+                    <div>
+                      <h3 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                        AUTHORIZATION AUDIT TRAIL
+                      </h3>
+                      <p className="text-xs text-stone-500">
+                        Immutable log of administrative authorizations, suspensions, and revocations
+                      </p>
+                    </div>
+                    <span className="badge badge-orange text-[10px] font-mono">
+                      {adminAuditLogs.length} Records
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-stone-200 dark:border-stone-800 text-stone-400 font-semibold uppercase text-[10px]">
+                          <th className="py-2.5 px-3">Actor</th>
+                          <th className="py-2.5 px-3">Target Admin</th>
+                          <th className="py-2.5 px-3">Action</th>
+                          <th className="py-2.5 px-3">Status Transition</th>
+                          <th className="py-2.5 px-3">Reason</th>
+                          <th className="py-2.5 px-3 text-right">Timestamp</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-200 dark:divide-stone-800 font-mono text-[11px]">
+                        {adminAuditLogs.slice(0, 15).map((log) => (
+                          <tr key={log.id} className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">
+                            <td className="py-2.5 px-3 font-bold text-orange-500">
+                              {log.actorEmail}
+                            </td>
+                            <td className="py-2.5 px-3 text-stone-800 dark:text-stone-200">
+                              {log.targetEmail}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-stone-500">
+                              {log.beforeStatus} → <span className="font-bold text-stone-900 dark:text-stone-100">{log.afterStatus}</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-sans text-xs text-stone-600 dark:text-stone-400 max-w-[200px] truncate">
+                              {log.reason || 'Operational security update'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right text-stone-400 text-[10px]">
+                              {new Date(log.timestamp).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: EXPORT & BACKUP */}
+        {/* ========================================================================= */}
+        {activeTab === 'BACKUP' && (
+          <div className="card p-6 space-y-4 animate-in fade-in">
+            <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+              Export, Disaster Recovery & Snapshots (Rules 58 & 59)
+            </h3>
+            <p className="text-xs text-stone-500">
+              Generate 1-click backups and download authoritative JSON and CSV archives of all event ledger transactions.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                onClick={handleExportJSON}
+                className="btn-primary py-2.5 px-6 text-xs font-bold flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Download JSON Snapshot
+              </button>
+
+              <button
+                onClick={handleExportCSV}
+                className="btn-secondary py-2.5 px-6 text-xs font-bold flex items-center gap-2"
+              >
+                <Download className="w-4 h-4 text-stone-400" />
+                Export Teams CSV
+              </button>
+
+              <button
+                onClick={() => setShowRestoreModal(true)}
+                className="btn-secondary py-2.5 px-6 text-xs font-bold flex items-center gap-2 ml-auto"
+              >
+                <Upload className="w-4 h-4 text-orange-500" />
+                Restore from Snapshot
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Confirmation Modal for Reset & Reseed (Rule 69) */}
+      {resetConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card max-w-md w-full p-6 bg-white dark:bg-[#12141C] space-y-4 shadow-2xl rounded-3xl border border-red-500/40 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950 text-red-600 mx-auto flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-black font-heading text-stone-900 dark:text-stone-100">
+                1-Click Rehearsal Reset & Reseed?
+              </h3>
+              <p className="text-xs text-stone-500 leading-relaxed">
+                This will reset team balances, clear proposals, restore initial stock, reseed RNG, and restart Round 2 fresh for simulation rehearsals.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setResetConfirmOpen(false)}
+                className="btn-secondary w-1/2 py-2 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  resetAndReseedSimulation();
+                  setResetConfirmOpen(false);
+                  showToast('Simulation successfully reset and reseeded!');
+                }}
+                className="btn-danger w-1/2 py-2 text-xs font-bold"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Snapshot Modal */}
+      {showRestoreModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card max-w-lg w-full p-6 bg-white dark:bg-[#12141C] space-y-4 shadow-2xl rounded-3xl border border-orange-500/40 animate-in zoom-in-95">
+            <h3 className="text-lg font-black font-heading text-stone-900 dark:text-stone-100">
+              Restore Event State from Snapshot
+            </h3>
+            <p className="text-xs text-stone-500">
+              Paste the JSON content from a previously downloaded snapshot file.
+            </p>
+            <textarea
+              rows={8}
+              value={restoreJsonInput}
+              onChange={(e) => setRestoreJsonInput(e.target.value)}
+              placeholder="Paste JSON snapshot content here..."
+              className="w-full text-xs font-mono p-3 rounded-xl border border-stone-200 dark:border-stone-800"
+            />
+            <div className="flex items-center justify-between pt-2">
+              <button
+                onClick={() => setShowRestoreModal(false)}
+                className="btn-secondary py-2 px-5 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRestoreSubmit}
+                className="btn-primary py-2 px-6 text-xs font-bold"
+              >
+                Restore Snapshot State
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </div>
+  );
+};
