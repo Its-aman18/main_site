@@ -6,6 +6,8 @@ import { LockdownOverlay } from './components/LockdownOverlay';
 import { CodeScrietLogo } from './components/CodeScrietLogo';
 import { Sun, Moon, ArrowLeft, Shield, ShieldCheck, LogOut } from 'lucide-react';
 
+import { CodeScrietAuthGate } from './components/CodeScrietAuthGate';
+
 const AdminRootApp: React.FC = () => {
   const {
     currentUser,
@@ -148,16 +150,9 @@ const AdminRootApp: React.FC = () => {
 
       {/* Content Router: Protected Admin View or 403 Forbidden Access Denied */}
       <main className="flex-1">
-        {verified ? (
+        <CodeScrietAuthGate requireAuth={true} requireAdmin={true} targetPath="/admin.html">
           <AdminControlCenter initialTab={currentTab} onNavigate={handleNavigate} />
-        ) : (
-          <AdminAccessDeniedPage
-            targetPath="/admin.html"
-            onNavigate={(view) => {
-              window.location.href = `/#${view}`;
-            }}
-          />
-        )}
+        </CodeScrietAuthGate>
       </main>
     </div>
   );

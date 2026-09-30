@@ -8,8 +8,10 @@
 // main-site identity. When no handoff is present (LAN / venue mode) it
 // returns null and the simulation keeps its local personas.
 
-import { getMainApiCandidates, getMainSiteOrigin, rememberMainApiOrigin } from '../lib/mainSite';
-import { clearZeroOneToken, storeZeroOneToken } from '../lib/authToken';
+import { getMainApiCandidates, rememberMainApiOrigin, getLoginUrl } from '../lib/mainSite';
+import { clearZeroOneToken, storeZeroOneToken, getZeroOneStoredToken } from '../lib/authToken';
+
+export { getLoginUrl };
 
 export interface MainSiteIdentity {
   id: string;
@@ -102,37 +104,50 @@ function toIdentity(user: Record<string, unknown>, token: string): MainSiteIdent
 }
 
 /**
- * Consume a main-site handoff (if present) and return the verified identity.
- * Returns null when there is no handoff token or validation fails — the
- * caller should then stay in LAN / persona mode.
+ * Consume a main-site handoff (if present) or validate existing stored session.
+ * Keeps authentication state consistent across refresh/navigation.
  */
 export async function consumeMainSiteHandoff(): Promise<MainSiteIdentity | null> {
   if (typeof window === 'undefined') return null;
   const { token: hashToken } = consumeHashToken();
-  if (!hashToken || isExpiredToken(hashToken)) {
-    if (hashToken) clearZeroOneToken();
+  const candidateToken = hashToken || getZeroOneStoredToken();
+  if (!candidateToken || isExpiredToken(candidateToken)) {
+    if (candidateToken) clearZeroOneToken();
     return null;
   }
 
   let sawReachable = false;
+
+  // First check zero-one local backend /api/auth/me which cryptographically verifies the session
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${candidateToken}` },
+      credentials: 'include',
+    });
+    if (res.ok) {
+      sawReachable = true;
+      const data = await res.json();
+      if (data && data.authenticated && data.user) {
+        storeZeroOneToken(candidateToken);
+        return toIdentity(data.user, candidateToken);
+      }
+    }
+  } catch {
+    // Proceed to check main API candidates
+  }
+
   for (const apiOrigin of getMainApiCandidates()) {
-    const result = await fetchMe(apiOrigin, hashToken);
+    const result = await fetchMe(apiOrigin, candidateToken);
     if (result.status !== 0) sawReachable = true;
     if (result.user) {
       rememberMainApiOrigin(apiOrigin);
-      const resolved = result.token || hashToken;
+      const resolved = result.token || candidateToken;
       storeZeroOneToken(resolved);
       return toIdentity(result.user, resolved);
     }
   }
 
-  // Token rejected by every reachable host — drop it so LAN mode is clean.
+  // Token rejected by every reachable host — drop it
   if (sawReachable) clearZeroOneToken();
   return null;
-}
-
-/** Sign-in URL on the main site, with a return trip back to zero-one. */
-export function getLoginUrl(nextUrl?: string): string {
-  const next = nextUrl || (typeof window !== 'undefined' ? window.location.href : '/');
-  return `${getMainSiteOrigin()}/signin?next=${encodeURIComponent(next)}`;
 }

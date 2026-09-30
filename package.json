@@ -10,7 +10,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "bash ./scripts/free-dev-ports.sh && concurrently -n \"API,WEB,PLAYGROUND\" -c \"blue,green,magenta\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\" \"npm run playground\"",
+    "dev": "node ./scripts/free-dev-ports.mjs && concurrently -n \"API,WEB,PLAYGROUND,ZERO-ONE\" -c \"blue,green,magenta,yellow\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\" \"npm run playground\" \"npm run dev --workspace=apps/zero-one\"",
     "start": "npm run build && npm run start:prod",
     "start:prod": "NODE_ENV=production concurrently \"npm run start --workspace=apps/api\" \"npm run preview --workspace=apps/web\"",
     "build": "npm run build --workspace=apps/web && npm run build --workspace=apps/api",
@@ -18,9 +18,9 @@
     "prerender": "node scripts/prerender.mjs",
     "web": "npm run dev --workspace=apps/web",
     "api": "npm run dev --workspace=apps/api",
-    "playground": "concurrently -n \"EXEC,PLAYGROUND\" -c \"cyan,magenta\" \"cd apps/playground && node execute-server.js\" \"npm run dev --workspace=apps/playground\"",
+    "playground": "concurrently -n \"EXEC,PLAYGROUND\" -c \"cyan,magenta\" \"npm run execute-server --workspace=apps/playground\" \"npm run dev --workspace=apps/playground\"",
     "playground:frontend": "npm run dev --workspace=apps/playground",
-    "playground:backend": "cd apps/playground && node execute-server.js",
+    "playground:backend": "npm run execute-server --workspace=apps/playground",
     "playground:build": "npm run build --workspace=apps/playground",
     "playground:preview": "npm run preview --workspace=apps/playground",
     "playground:deploy": "cd apps/playground && ./deploy.sh",

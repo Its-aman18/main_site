@@ -17,3 +17,7 @@ import dotenv from 'dotenv';
 // resolved against process.cwd() (apps/api in dev + prod start scripts).
 dotenv.config({ path: '../../.env' });
 dotenv.config();
+
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'development';
+}

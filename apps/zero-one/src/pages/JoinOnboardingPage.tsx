@@ -31,7 +31,6 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
     teams,
     setCurrentTeamId,
     isLoggedIn,
-    loginWithEmail,
   } = useSimulation();
 
   const [step, setStep] = useState<number>(1);
@@ -43,7 +42,6 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
   );
   const [deviceName, setDeviceName] = useState<string>('Founder Primary Device (Bound)');
   const [joinedSuccess, setJoinedSuccess] = useState<boolean>(false);
-  const [joinEmail, setJoinEmail] = useState<string>('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const roles: {
@@ -464,38 +462,19 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
               {!isLoggedIn ? (
                 <div className="flex-1 ml-4 p-4 rounded-2xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/60 space-y-2.5">
                   <div className="text-xs font-bold text-stone-900 dark:text-stone-100">
-                    Sign in to bind your squad role
+                    Authentication required to bind your squad role
                   </div>
                   <p className="text-[11px] text-stone-500">
-                    Arriving from codescriet.dev signs you in automatically. Otherwise use your event email:
+                    ZERO → ONE uses centralized authentication via codescriet.dev. Sign in with your Code.SCRIET account:
                   </p>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <a
                       href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
-                      className="btn-primary text-xs py-2.5 px-4 text-center"
+                      className="btn-primary text-xs py-2.5 px-6 text-center inline-flex items-center justify-center gap-2"
                     >
-                      Sign in with Code.SCRIET
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Continue with Code.SCRIET</span>
                     </a>
-                    <div className="flex flex-1 gap-2">
-                      <input
-                        type="email"
-                        value={joinEmail}
-                        onChange={(e) => setJoinEmail(e.target.value)}
-                        placeholder="you@college.edu"
-                        className="input-text text-xs flex-1"
-                      />
-                      <button
-                        onClick={() => {
-                          if (joinEmail.trim()) {
-                            loginWithEmail(joinEmail.trim());
-                            setJoinError(null);
-                          }
-                        }}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:opacity-90"
-                      >
-                        Continue
-                      </button>
-                    </div>
                   </div>
                   {joinError && (
                     <div className="text-[11px] font-semibold text-red-600 dark:text-red-400">{joinError}</div>

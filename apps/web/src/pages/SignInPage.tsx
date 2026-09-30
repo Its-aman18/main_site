@@ -10,6 +10,7 @@ import { Chrome, Github, Mail, AlertCircle, Loader2, Eye, EyeOff, Lock, User, Ar
 import { api } from '@/lib/api';
 import type { AuthProviders } from '@/lib/api';
 import { addPlaygroundAuthHandoff, isPlaygroundOrigin } from '@/lib/playgroundUrl';
+import { addZeroOneAuthHandoff, isZeroOneOrigin } from '@/lib/zeroOneUrl';
 import { getSafeNextUrl } from '@/lib/safeNext';
 import { getStoredAuthToken } from '@/lib/authToken';
 import { useAuth } from '@/context/AuthContext';
@@ -36,6 +37,9 @@ const redirectToNext = (navigate: ReturnType<typeof useNavigate>, targetUrl: str
   const parsed = new URL(targetUrl);
   if (isPlaygroundOrigin(parsed.origin)) {
     addPlaygroundAuthHandoff(parsed);
+  }
+  if (isZeroOneOrigin(parsed.origin)) {
+    addZeroOneAuthHandoff(parsed);
   }
   if (parsed.origin === window.location.origin) {
     navigate(`${parsed.pathname}${parsed.search}${parsed.hash}`);

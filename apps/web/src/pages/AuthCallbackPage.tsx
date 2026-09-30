@@ -4,6 +4,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { api } from '@/lib/api';
 import { getSafeNextUrl, getSafeRelativePath } from '@/lib/safeNext';
+import { isZeroOneOrigin, addZeroOneAuthHandoff } from '@/lib/zeroOneUrl';
+import { isPlaygroundOrigin, addPlaygroundAuthHandoff } from '@/lib/playgroundUrl';
 import { Loader2 } from 'lucide-react';
 
 interface HiringIntent {
@@ -234,9 +236,16 @@ export default function AuthCallbackPage() {
         const safeNext = getSafeNextUrl(storedNext);
         if (safeNext) {
           const target = new URL(safeNext);
-          // OAuth callback only follows same-origin in-app paths (no
-          // cross-subdomain token handoff on this path). getSafeRelativePath
-          // is the final navigate guard.
+          if (isZeroOneOrigin(target.origin)) {
+            addZeroOneAuthHandoff(target);
+            window.location.assign(target.toString());
+            return;
+          }
+          if (isPlaygroundOrigin(target.origin)) {
+            addPlaygroundAuthHandoff(target);
+            window.location.assign(target.toString());
+            return;
+          }
           const relative = target.origin === window.location.origin
             ? getSafeRelativePath(`${target.pathname}${target.search}${target.hash}`)
             : null;

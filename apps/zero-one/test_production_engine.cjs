@@ -1,14 +1,35 @@
 const http = require('http');
+const jwt = require('jsonwebtoken');
+
+const TEST_SECRET = process.env.JWT_SECRET || 'dev_local_jwt_secret_change_me_before_production';
+
+function makeTestToken(email = 'aman@scriet.edu', role = 'MEMBER', userId = 'usr-test-founder') {
+  return jwt.sign(
+    {
+      userId,
+      email,
+      name: email.split('@')[0],
+      role,
+    },
+    TEST_SECRET,
+    { algorithm: 'HS256', expiresIn: '7d' }
+  );
+}
 
 function request(options, postData) {
+  const email = options.headers?.['x-user-email'] || 'aman@scriet.edu';
+  const role = options.headers?.['x-user-role'] || 'MEMBER';
+  const token = options.headers?.Authorization ? options.headers.Authorization.replace('Bearer ', '') : makeTestToken(email, role);
+
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         hostname: 'localhost',
-        port: parseInt(process.env.ZERO_ONE_TEST_PORT || process.env.ZERO_ONE_PORT || process.env.PORT || '5003', 10),
+        port: parseInt(process.env.ZERO_ONE_TEST_PORT || process.env.ZERO_ONE_PORT || process.env.PORT || '5175', 10),
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
           ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {}),
           ...options.headers,
         },
@@ -32,13 +53,18 @@ function request(options, postData) {
 }
 
 function sendCommand(cmd, headers = {}) {
+  const email = headers.email || 'aman@scriet.edu';
+  const role = headers.role || 'CFO';
+  const token = headers.Authorization ? headers.Authorization.replace('Bearer ', '') : makeTestToken(email, role);
+
   return request(
     {
       path: '/api/zero-one/commands',
       method: 'POST',
       headers: {
-        'x-user-email': headers.email || 'aman@scriet.edu',
-        'x-user-role': headers.role || 'CFO',
+        Authorization: `Bearer ${token}`,
+        'x-user-email': email,
+        'x-user-role': role,
         ...headers,
       },
     },

@@ -47,6 +47,16 @@ import { resolveApiUrl } from '../lib/apiBase';
 import { clearZeroOneToken, getZeroOneStoredToken } from '../lib/authToken';
 import { consumeMainSiteHandoff } from './mainSiteAuth';
 
+export type AuthStateType =
+  | 'AUTH_LOADING'
+  | 'NOT_AUTHENTICATED'
+  | 'AUTHENTICATED'
+  | 'SESSION_EXPIRED'
+  | 'AUTHENTICATED_NOT_AUTHORIZED'
+  | 'ADMIN_REVOKED'
+  | 'SERVER_UNAVAILABLE'
+  | 'INVALID_SESSION';
+
 export interface LiveScreenConfig {
   showLeaderboard: boolean;
   showCrisisGrid: boolean;
@@ -59,6 +69,7 @@ interface SimulationContextType {
   // Auth & SSO
   currentUser: CodeScrietUser;
   authToken: string | null;
+  authState: AuthStateType;
   currentRole: SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC';
   setCurrentRole: (role: SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC') => void;
   switchUser: (user: CodeScrietUser, role: SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC') => void;
@@ -243,6 +254,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [currentUser, setCurrentUser] = useState<CodeScrietUser>(() => {
     return readStoredUser() || GUEST_USER;
   });
+
+  const [authState, setAuthState] = useState<AuthStateType>('AUTH_LOADING');
+  const [serverAdminStatus, setServerAdminStatus] = useState<AdminAuthorizationStatus>('NONE');
+  const [serverIsSuperAdmin, setServerIsSuperAdmin] = useState<boolean>(false);
 
   const [currentRole, setCurrentRole] = useState<SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC'>(() => {
     try {
@@ -1987,17 +2002,20 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const logout = useCallback(() => {
     // Full sign-out: identity back to guest, no role, every token dropped
-    // (handoff JWT, legacy tokens, persisted identity, device binding) so a
-    // reload or revisit cannot resurrect the session.
     setCurrentUser(GUEST_USER);
     setCurrentRole('PUBLIC');
     setAuthToken(null);
+    setAuthState('NOT_AUTHENTICATED');
+    setServerAdminStatus('NONE');
+    setServerIsSuperAdmin(false);
     clearZeroOneToken();
     persistStoredUser(null);
     try {
       localStorage.removeItem('token');
       sessionStorage.removeItem('token');
       localStorage.removeItem('zero_one_device_token');
+      localStorage.removeItem('zero_one_admin_authorizations');
+      zoFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     } catch {
       // storage blocked — in-memory state is already cleared above
     }
@@ -2036,14 +2054,21 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const isAdminVerified = useCallback(
     (identifier?: string): boolean => {
+      if (!identifier || identifier.toLowerCase() === currentUser.email.toLowerCase() || identifier === currentUser.id) {
+        if (serverAdminStatus === 'ACTIVE') return true;
+        if (serverIsSuperAdmin) return true;
+      }
       const status = getAdminStatus(identifier);
       return status === 'ACTIVE' || status === 'ADMIN_VERIFIED';
     },
-    [getAdminStatus]
+    [getAdminStatus, currentUser.email, currentUser.id, serverAdminStatus, serverIsSuperAdmin]
   );
 
   const isSuperAdmin = useCallback(
     (identifier?: string): boolean => {
+      if (!identifier || identifier.toLowerCase() === currentUser.email.toLowerCase() || identifier === currentUser.id) {
+        if (serverIsSuperAdmin) return true;
+      }
       const targetEmail = (identifier || currentUser.email || '').toLowerCase().trim();
       const targetId = identifier || currentUser.id;
       const authRecord = adminAuthorizations.find(
@@ -2053,15 +2078,46 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const isActive = !authRecord ? true : (authRecord.status === 'ACTIVE' || Boolean(authRecord.active));
       return Boolean(isMatch && isActive);
     },
-    [currentUser.email, currentUser.id, adminAuthorizations]
+    [currentUser.email, currentUser.id, adminAuthorizations, serverIsSuperAdmin]
   );
 
-  // Authoritative State Refresh from Backend (requirement 13)
+  // Authoritative State Refresh from Backend (requirement 13 & 23)
   const refreshAuthorizationState = useCallback(async () => {
     try {
-      const res = await zoFetch('/api/state');
-      if (res.ok) {
-        const state = await res.json();
+      const [stateRes, authRes] = await Promise.all([
+        zoFetch('/api/state'),
+        zoFetch('/api/auth/me'),
+      ]);
+
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        if (authData && authData.authenticated && authData.user) {
+          const verifiedUser: CodeScrietUser = {
+            id: authData.user.id,
+            name: authData.user.name,
+            email: authData.user.email,
+            role: authData.user.role as CodeScrietUser['role'],
+            avatarUrl: authData.user.avatar || undefined,
+          };
+          setCurrentUser(verifiedUser);
+          persistStoredUser(verifiedUser);
+          setServerAdminStatus(authData.adminStatus || 'NONE');
+          setServerIsSuperAdmin(Boolean(authData.isSuperAdmin));
+          setAuthState('AUTHENTICATED');
+        } else {
+          setServerAdminStatus('NONE');
+          setServerIsSuperAdmin(false);
+          const storedToken = getZeroOneStoredToken();
+          if (storedToken) {
+            setAuthState('SESSION_EXPIRED');
+          } else {
+            setAuthState('NOT_AUTHENTICATED');
+          }
+        }
+      }
+
+      if (stateRes.ok) {
+        const state = await stateRes.json();
         if (state.adminAuthorizations) {
           setAdminAuthorizations(state.adminAuthorizations);
           localStorage.setItem(STORAGE_PREFIX + 'admin_authorizations', JSON.stringify(state.adminAuthorizations));
@@ -2084,15 +2140,21 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return () => window.removeEventListener('focus', onFocus);
   }, [refreshAuthorizationState]);
 
-  // Main-site session handoff (shared-JWT integration, playground-style).
-  // The main site links here with `#token=<jwt>&api=<origin>`; validate it
-  // against the main API and adopt the verified identity. No handoff token
-  // (LAN / venue mode) leaves the local personas untouched.
+  // Main-site session handoff & validation
   useEffect(() => {
     let cancelled = false;
     consumeMainSiteHandoff()
       .then((identity) => {
-        if (cancelled || !identity) return;
+        if (cancelled) return;
+        if (!identity) {
+          const storedToken = getZeroOneStoredToken();
+          if (storedToken) {
+            setAuthState('SESSION_EXPIRED');
+          } else {
+            setAuthState('NOT_AUTHENTICATED');
+          }
+          return;
+        }
         const verifiedUser: CodeScrietUser = {
           id: identity.id,
           name: identity.name,
@@ -2104,10 +2166,11 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         persistStoredUser(verifiedUser);
         setCurrentRole((prev) => (prev === 'PUBLIC' ? 'CEO' : prev));
         setAuthToken(identity.token);
+        setAuthState('AUTHENTICATED');
         refreshAuthorizationState();
       })
       .catch(() => {
-        // Offline / unreachable main API — stay in LAN mode.
+        if (!cancelled) setAuthState('NOT_AUTHENTICATED');
       });
     return () => {
       cancelled = true;
@@ -2238,6 +2301,11 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const loginWithEmail = useCallback(
     (email: string, name?: string) => {
+      // In production mode, mock persona login is disabled
+      if (import.meta.env.PROD) {
+        console.warn('[zero-one] Independent login is disabled in production. Use Code.SCRIET authentication.');
+        return;
+      }
       const cleanEmail = email.trim().toLowerCase();
       const authRecord = adminAuthorizations.find(
         (a) => a.email.toLowerCase() === cleanEmail && a.active && a.verified
@@ -2258,19 +2326,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setCurrentUser(newUser);
       persistStoredUser(newUser);
       setCurrentRole(simRole);
-      // LAN persona login: drop any main-site handoff token so the backend
-      // does not keep preferring the previous verified JWT identity.
-      clearZeroOneToken();
-      setAuthToken(`mock-token-${cleanEmail}-${Date.now()}`);
-      localStorage.setItem('token', `mock-token-${cleanEmail}`);
-
-      setAdminNotification({
-        title: isVerified ? 'Verified Admin Login' : 'Login Successful',
-        message: isVerified
-          ? `Welcome ${newUser.name}. Verified as ${authRecord.role}. Admin Panel is unlocked.`
-          : `Welcome ${newUser.name}. Signed in with Code.SCRIET Member account.`,
-        type: isVerified ? 'success' : 'info',
-      });
+      setAuthState('AUTHENTICATED');
     },
     [adminAuthorizations]
   );
@@ -2372,10 +2428,11 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => ({
       currentUser,
       authToken,
+      authState,
       currentRole,
       setCurrentRole,
       switchUser,
-      isLoggedIn: currentRole !== 'PUBLIC',
+      isLoggedIn: Boolean(currentUser.email) && currentRole !== 'PUBLIC',
       logout,
       authorizationState,
       eventStatus,
@@ -2465,6 +2522,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [
       currentUser,
       authToken,
+      authState,
       currentRole,
       authorizationState,
       switchUser,

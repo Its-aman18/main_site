@@ -193,8 +193,8 @@ function applyZeroOneCors(req: IncomingMessage, res: ServerResponse): void {
 export interface ZeroOneVerifiedIdentity {
   email: string;
   name?: string;
-  role?: string;
-  userId?: string;
+  role: string;
+  userId: string;
 }
 
 let zeroOneJwtWarned = false;
@@ -209,6 +209,11 @@ function getZeroOneJwtSecrets(): string[] {
   for (const key of ['JWT_SECRET', 'JWT_SECRET_KEY', 'AUTH_JWT_SECRET', 'AUTH_SECRET']) {
     const value = readZeroOneEnv(key);
     if (value && !secrets.includes(value)) secrets.push(value);
+  }
+  // In development / test environments, also accept the monorepo dev fallback secret
+  if (readZeroOneEnv('NODE_ENV') !== 'production') {
+    const devFallback = 'dev_local_jwt_secret_change_me_before_production';
+    if (!secrets.includes(devFallback)) secrets.push(devFallback);
   }
   return secrets;
 }
@@ -1004,13 +1009,12 @@ export class ZeroOneBackendEngine {
     return { ...rest, adminAuthorizations: [], adminAuditLogs: [] };
   }
 
-  /** Verified main-site JWT identity stashed per-request by the middleware. */
+  /** Verified main-site JWT identity stashed per-request by the middleware. Never falls back to client-supplied headers. */
   public static verifiedEmailFor(req: IncomingMessage): string {
     const verified = (req as unknown as { zeroOneVerifiedEmail?: unknown })
       .zeroOneVerifiedEmail;
     if (typeof verified === 'string' && verified.includes('@')) return verified;
-    const header = req.headers['x-user-email'];
-    return typeof header === 'string' ? header : '';
+    return '';
   }
 
   public getFactLog(): EventFact[] {
@@ -1111,8 +1115,15 @@ export class ZeroOneBackendEngine {
 
   public requireAdmin(req: IncomingMessage, res: ServerResponse): boolean {
     if (res.headersSent) return false;
-    // Verified main-site JWT identity outranks the self-asserted header.
     const userEmail = ZeroOneBackendEngine.verifiedEmailFor(req);
+    if (!userEmail) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: '401 Unauthorized: Valid Code.SCRIET authentication required',
+        statusCode: 401,
+      }));
+      return false;
+    }
     const status = this.getUserAdminStatus(userEmail);
     if (status !== 'ACTIVE') {
       res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -1129,8 +1140,15 @@ export class ZeroOneBackendEngine {
 
   public requireSuperAdmin(req: IncomingMessage, res: ServerResponse): boolean {
     if (res.headersSent) return false;
-    // Verified main-site JWT identity outranks the self-asserted header.
     const userEmail = ZeroOneBackendEngine.verifiedEmailFor(req);
+    if (!userEmail) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: '401 Unauthorized: Valid Code.SCRIET authentication required',
+        statusCode: 401,
+      }));
+      return false;
+    }
     if (!this.isUserSuperAdmin(userEmail)) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -3035,8 +3053,7 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
         (req as unknown as { zeroOneVerifiedEmail?: string }).zeroOneVerifiedEmail =
           verified.email;
       }
-      const actorEmail =
-        verified?.email || (req.headers['x-user-email'] as string) || '';
+      const actorEmail = verified?.email || '';
 
       // 1. Health
       if (url === '/api/health') {
@@ -3050,14 +3067,17 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
 
       // 1b. Session status (playground-style /api/auth/status equivalent)
       if (url === '/api/auth/status' && req.method === 'GET') {
+        const adminStatus = actorEmail ? serverEngine.getUserAdminStatus(actorEmail) : 'NONE';
+        const isSuperAdmin = actorEmail ? serverEngine.isUserSuperAdmin(actorEmail) : false;
         res.writeHead(200);
         return res.end(JSON.stringify({
           authenticated: Boolean(verified),
           email: verified?.email || null,
           name: verified?.name || null,
           role: verified?.role || null,
-          adminStatus: serverEngine.getUserAdminStatus(actorEmail || undefined),
-          isSuperAdmin: actorEmail ? serverEngine.isUserSuperAdmin(actorEmail) : false,
+          userId: verified?.userId || null,
+          adminStatus,
+          isSuperAdmin,
         }));
       }
 
@@ -3081,16 +3101,24 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
 
       // 4. UNIFIED COMMAND ENDPOINT (POST /api/zero-one/commands & POST /api/commands)
       if ((url === '/api/zero-one/commands' || url === '/api/commands') && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            success: false,
+            error: {
+              code: 'UNAUTHORIZED',
+              message: 'Valid Code.SCRIET authentication required to dispatch commands',
+            },
+          }));
+        }
         const body = await parseJsonBody(req);
         const command: Command = {
           commandId: body.commandId || 'cmd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
           deviceId: body.deviceId || (req.headers['x-device-id'] as string) || 'dev-unknown',
-          // Verified main-site identity wins over self-asserted values, so a
-          // participant cannot spoof another team's email once SSO is on.
-          userId: verified?.userId || body.userId || (req.headers['x-user-email'] as string) || 'anonymous',
-          userEmail: verified?.email || body.userEmail || (req.headers['x-user-email'] as string) || undefined,
+          userId: verified.userId || verified.email,
+          userEmail: verified.email,
           teamId: body.teamId,
-          role: body.role || (req.headers['x-user-role'] as any),
+          role: body.role,
           type: body.type,
           payload: body.payload || {},
           clientCreatedAt: body.clientCreatedAt || new Date().toISOString(),
@@ -3159,39 +3187,106 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
         return res.end(JSON.stringify(serverEngine.getAuthoritativeState()));
       }
 
-      // 8. Auth diagnostic (main-site session aware).
-      // Verified JWT identity wins; `?email=` / header fallback keeps LAN
-      // diagnostics and the admin console working without SSO.
+      // 8. Auth Authoritative Identity & Authorization
       if (url.startsWith('/api/auth/me')) {
-        const urlParams = new URL(url, 'http://localhost');
-        const email =
-          verified?.email ||
-          urlParams.searchParams.get('email') ||
-          (req.headers['x-user-email'] as string) ||
-          '';
-        const status = serverEngine.getUserAdminStatus(email);
-        const isSuper = serverEngine.isUserSuperAdmin(email);
+        if (!verified) {
+          res.writeHead(200);
+          return res.end(JSON.stringify({
+            authenticated: false,
+            user: null,
+            adminStatus: 'NONE',
+            isSuperAdmin: false,
+            verified: false,
+            authorization: {
+              verified: false,
+              active: false,
+              role: 'NONE',
+              status: 'NONE',
+            },
+          }));
+        }
+        const status = serverEngine.getUserAdminStatus(verified.email);
+        const isSuper = serverEngine.isUserSuperAdmin(verified.email);
+        const authRecord = serverEngine.getAuthoritativeState().adminAuthorizations.find(
+          (a) => a.email.toLowerCase() === verified.email.toLowerCase()
+        );
+        const role = isSuper ? 'SUPER_ADMIN' : authRecord?.role || 'NONE';
         res.writeHead(200);
         return res.end(JSON.stringify({
-          email,
+          authenticated: true,
+          email: verified.email,
           adminStatus: status,
           isSuperAdmin: isSuper,
           verified: status === 'ACTIVE',
-          authenticated: Boolean(verified),
-          user: verified
-            ? {
-              id: verified.userId,
-              name: verified.name,
-              email: verified.email,
-              role: verified.role,
-            }
-            : null,
+          user: {
+            id: verified.userId,
+            name: verified.name || verified.email.split('@')[0],
+            email: verified.email,
+            role: verified.role,
+          },
+          authorization: {
+            verified: status === 'ACTIVE',
+            active: status === 'ACTIVE',
+            role,
+            status,
+          },
         }));
+      }
+
+      if (url.startsWith('/api/auth/authorization') && req.method === 'GET') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            authenticated: false,
+            user: null,
+            authorization: {
+              verified: false,
+              active: false,
+              role: 'NONE',
+              status: 'NONE',
+            },
+          }));
+        }
+        const status = serverEngine.getUserAdminStatus(verified.email);
+        const isSuper = serverEngine.isUserSuperAdmin(verified.email);
+        const authRecord = serverEngine.getAuthoritativeState().adminAuthorizations.find(
+          (a) => a.email.toLowerCase() === verified.email.toLowerCase()
+        );
+        const role = isSuper ? 'SUPER_ADMIN' : authRecord?.role || 'NONE';
+        res.writeHead(200);
+        return res.end(JSON.stringify({
+          authenticated: true,
+          user: {
+            id: verified.userId,
+            name: verified.name || verified.email.split('@')[0],
+            email: verified.email,
+            role: verified.role,
+          },
+          authorization: {
+            verified: status === 'ACTIVE',
+            active: status === 'ACTIVE',
+            role,
+            status,
+          },
+        }));
+      }
+
+      if (url === '/api/auth/logout' && req.method === 'POST') {
+        res.setHeader(
+          'Set-Cookie',
+          'scriet_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax'
+        );
+        res.writeHead(200);
+        return res.end(JSON.stringify({ success: true, message: 'Logged out successfully' }));
       }
 
       // 9. Judge Assigned Teams (Judge Isolation)
       if (url.startsWith('/api/judge/assigned-teams') && req.method === 'GET') {
-        const judgeEmail = (verified?.email || (req.headers['x-user-email'] as string) || '').toLowerCase();
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const judgeEmail = verified.email.toLowerCase();
         const teams = serverEngine.getAssignedTeamsForJudge(judgeEmail);
         res.writeHead(200);
         return res.end(JSON.stringify({ success: true, teams }));
@@ -3199,8 +3294,7 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
 
       // --- PROTECTED ADMIN APIS ---
       if (url.startsWith('/api/admin/')) {
-        // Verified main-site identity wins; header fallback preserves LAN mode.
-        const actorEmail = verified?.email || (req.headers['x-user-email'] as string) || 'admin';
+        const actorEmail = verified?.email || '';
 
         // SUPER ADMIN EXCLUSIVE ROUTES
         if (url.startsWith('/api/admin/search-user') && req.method === 'GET') {
@@ -3360,6 +3454,7 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
         }
 
         if (url === '/api/admin/reset' && req.method === 'POST') {
+          if (!serverEngine.requireSuperAdmin(req, res)) return;
           serverEngine.handleReset();
           res.writeHead(200);
           return res.end(JSON.stringify({ success: true }));
@@ -3375,9 +3470,13 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
       }
 
       if (url === '/api/participant/purchase' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
         const body = await parseJsonBody(req);
-        const userEmail = (req.headers['x-user-email'] as string) || body.actorEmail || 'participant';
-        const userRole = (req.headers['x-user-role'] as string) || body.actorRole || 'CFO';
+        const userEmail = verified.email;
+        const userRole = body.actorRole || 'CFO';
         const result = serverEngine.handlePurchase(
           body.teamId,
           body.sku,
@@ -3390,24 +3489,36 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
       }
 
       if (url === '/api/participant/crisis/response' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
         const body = await parseJsonBody(req);
-        const userEmail = (req.headers['x-user-email'] as string) || 'participant';
+        const userEmail = verified.email;
         const result = serverEngine.handleCrisisResponse(body.teamId, body.optionId, body.tradeoff, userEmail);
         res.writeHead(result.success ? 200 : 400);
         return res.end(JSON.stringify(result));
       }
 
       if (url === '/api/participant/auction/bid' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
         const body = await parseJsonBody(req);
-        const userEmail = (req.headers['x-user-email'] as string) || 'participant';
+        const userEmail = verified.email;
         const result = serverEngine.handleAuctionBid(body.teamId, body.teamName, body.amount, userEmail);
         res.writeHead(result.success ? 200 : 400);
         return res.end(JSON.stringify(result));
       }
 
       if (url === '/api/judge/score' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
         const body = await parseJsonBody(req);
-        const userEmail = (req.headers['x-user-email'] as string) || 'judge';
+        const userEmail = verified.email;
         const score = serverEngine.handleJudgeScore(body, userEmail);
         res.writeHead(200);
         return res.end(JSON.stringify({ success: true, score }));

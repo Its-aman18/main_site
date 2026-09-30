@@ -18,7 +18,7 @@ import { AuctionTradePage } from './pages/AuctionTradePage';
 import { ResultsRevealPage } from './pages/ResultsRevealPage';
 import { JoinOnboardingPage } from './pages/JoinOnboardingPage';
 import { PitchPage } from './pages/PitchPage';
-import { AdminAccessDeniedPage } from './pages/AdminAccessDeniedPage';
+import { CodeScrietAuthGate } from './components/CodeScrietAuthGate';
 
 const SimulationApp: React.FC = () => {
   const { isAdminVerified } = useSimulation();
@@ -107,57 +107,11 @@ const SimulationApp: React.FC = () => {
 
       {/* Main View Switcher */}
       <div className="flex-1">
+        {/* Public Informational Views */}
         {normalizedView === 'landing' && <LandingPage onNavigate={navigateTo} />}
         {normalizedView === 'events-directory' && <EventsDirectoryPage onNavigate={navigateTo} />}
         {normalizedView === 'onboarding' && <JoinOnboardingPage onNavigate={navigateTo} />}
-        {normalizedView === 'team-dashboard' && <TeamDashboardPage onNavigate={navigateTo} />}
-        {normalizedView === 'market' && <DigitalMarketPage onNavigate={navigateTo} />}
-        {normalizedView === 'crisis' && <CrisisPage onNavigate={navigateTo} />}
         {normalizedView === 'live-screen' && <LiveScreenPage onNavigate={navigateTo} />}
-        {normalizedView === 'admin-control' &&
-          (isAdminVerified() ? (
-            <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-orange-600 flex items-center justify-center animate-spin">
-                <CodeScrietLogo size={28} />
-              </div>
-              <h2 className="text-xl font-bold font-heading">Redirecting to Admin Control Center...</h2>
-              <p className="text-xs text-stone-500">Launching separate mission control interface at /admin.html</p>
-              <a
-                href="/admin.html"
-                className="px-5 py-2.5 rounded-xl bg-orange-600 text-white font-bold text-xs hover:bg-orange-500 shadow-md transition-all"
-              >
-                Click here if not redirected automatically
-              </a>
-            </div>
-          ) : (
-            <AdminAccessDeniedPage onNavigate={navigateTo} targetPath="/admin.html" />
-          ))}
-        {normalizedView === 'admin-verification' &&
-          (isAdminVerified() ? (
-            <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
-              <h2 className="text-xl font-bold font-heading">Redirecting to Admin Verification Center...</h2>
-              <a
-                href="/admin.html#verification"
-                className="px-5 py-2.5 rounded-xl bg-orange-600 text-white font-bold text-xs hover:bg-orange-500 shadow-md transition-all"
-              >
-                Open Admin Verification (admin.html#verification)
-              </a>
-            </div>
-          ) : (
-            <AdminAccessDeniedPage onNavigate={navigateTo} targetPath="/admin.html#verification" />
-          ))}
-        {normalizedView === 'canvas' && <StartupCanvasPage onNavigate={navigateTo} />}
-        {normalizedView === 'inventory' && (
-          <InventoryTransactionsPage initialTab="INVENTORY" onNavigate={navigateTo} />
-        )}
-        {normalizedView === 'transactions' && (
-          <InventoryTransactionsPage initialTab="TRANSACTIONS" onNavigate={navigateTo} />
-        )}
-        {normalizedView === 'team' && <MarshalPortalPage onNavigate={navigateTo} />}
-        {normalizedView === 'judge-portal' && <JudgePortalPage onNavigate={navigateTo} />}
-        {normalizedView === 'marshal-portal' && <MarshalPortalPage onNavigate={navigateTo} />}
-        {normalizedView === 'auction' && <AuctionTradePage onNavigate={navigateTo} />}
-        {normalizedView === 'pitch' && <PitchPage onNavigate={navigateTo} />}
         {normalizedView === 'reveal' && <ResultsRevealPage onNavigate={navigateTo} />}
         {normalizedView === 'announcements' && (
           <div className="max-w-4xl mx-auto py-10 px-4">
@@ -171,6 +125,96 @@ const SimulationApp: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Protected Simulation Views - Centrally Gated by Code.SCRIET Session */}
+        {normalizedView === 'team-dashboard' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <TeamDashboardPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'market' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <DigitalMarketPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'crisis' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <CrisisPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'canvas' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <StartupCanvasPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'inventory' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <InventoryTransactionsPage initialTab="INVENTORY" onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'transactions' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <InventoryTransactionsPage initialTab="TRANSACTIONS" onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'team' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <MarshalPortalPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'judge-portal' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <JudgePortalPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'marshal-portal' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <MarshalPortalPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'auction' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <AuctionTradePage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+        {normalizedView === 'pitch' && (
+          <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
+            <PitchPage onNavigate={navigateTo} />
+          </CodeScrietAuthGate>
+        )}
+
+        {/* Protected Admin Routes */}
+        {normalizedView === 'admin-control' && (
+          <CodeScrietAuthGate requireAuth={true} requireAdmin={true} targetPath="/admin.html" onNavigate={navigateTo}>
+            <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-orange-600 flex items-center justify-center animate-spin">
+                <CodeScrietLogo size={28} />
+              </div>
+              <h2 className="text-xl font-bold font-heading">Redirecting to Admin Control Center...</h2>
+              <p className="text-xs text-stone-500">Launching separate mission control interface at /admin.html</p>
+              <a
+                href="/admin.html"
+                className="px-5 py-2.5 rounded-xl bg-orange-600 text-white font-bold text-xs hover:bg-orange-500 shadow-md transition-all"
+              >
+                Click here if not redirected automatically
+              </a>
+            </div>
+          </CodeScrietAuthGate>
+        )}
+
+        {normalizedView === 'admin-verification' && (
+          <CodeScrietAuthGate requireAuth={true} requireAdmin={true} targetPath="/admin.html#verification" onNavigate={navigateTo}>
+            <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
+              <h2 className="text-xl font-bold font-heading">Redirecting to Admin Verification Center...</h2>
+              <a
+                href="/admin.html#verification"
+                className="px-5 py-2.5 rounded-xl bg-orange-600 text-white font-bold text-xs hover:bg-orange-500 shadow-md transition-all"
+              >
+                Open Admin Verification (admin.html#verification)
+              </a>
+            </div>
+          </CodeScrietAuthGate>
         )}
 
         {/* Fallback for unknown routes */}

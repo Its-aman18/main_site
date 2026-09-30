@@ -121,3 +121,42 @@ export function getMainSiteOrigin(): string {
 
   return CODESCRIET_MAIN_SITE_ORIGIN;
 }
+
+export function isAllowedRedirectUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  const trimmed = urlStr.trim();
+  // Safe relative paths: /something but NOT //evil.com
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return true;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (isLocalHost(hostname)) return true;
+    if (isCodescrietHost(hostname)) return true;
+    const configuredMain = getConfiguredMainApiOrigin();
+    if (configuredMain && new URL(configuredMain).hostname.toLowerCase() === hostname) return true;
+    const configuredSite = parseOrigin(import.meta.env.VITE_MAIN_SITE_URL);
+    if (configuredSite && new URL(configuredSite).hostname.toLowerCase() === hostname) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function getSafeRedirectUrl(targetUrl?: string | null, fallback = '/'): string {
+  if (targetUrl && isAllowedRedirectUrl(targetUrl)) {
+    return targetUrl.trim();
+  }
+  return fallback;
+}
+
+/** Sign-in URL on the main site, with a return trip back to zero-one. */
+export function getLoginUrl(nextUrl?: string): string {
+  const current = typeof window !== 'undefined' ? window.location.href : '/';
+  const rawTarget = nextUrl || current;
+  const safeTarget = getSafeRedirectUrl(rawTarget, current);
+  return `${getMainSiteOrigin()}/signin?next=${encodeURIComponent(safeTarget)}`;
+}
+
