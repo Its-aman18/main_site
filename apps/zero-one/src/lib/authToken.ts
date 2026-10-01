@@ -40,7 +40,13 @@ function looksLikeJwt(value: string): boolean {
 export function getZeroOneStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   const sessionToken = safeGet(window.sessionStorage, ZERO_ONE_TOKEN_KEY);
-  if (sessionToken) return sessionToken;
+  if (sessionToken && looksLikeJwt(sessionToken)) return sessionToken;
+
+  const localToken = safeGet(window.localStorage, ZERO_ONE_TOKEN_KEY);
+  if (localToken && looksLikeJwt(localToken)) {
+    safeSet(window.sessionStorage, ZERO_ONE_TOKEN_KEY, localToken);
+    return localToken;
+  }
 
   // One-time migration of a real main-site JWT left under the legacy key.
   const legacy =
@@ -48,6 +54,7 @@ export function getZeroOneStoredToken(): string | null {
     safeGet(window.localStorage, LEGACY_TOKEN_KEY);
   if (legacy && looksLikeJwt(legacy)) {
     safeSet(window.sessionStorage, ZERO_ONE_TOKEN_KEY, legacy);
+    safeSet(window.localStorage, ZERO_ONE_TOKEN_KEY, legacy);
     return legacy;
   }
   return null;
@@ -56,9 +63,11 @@ export function getZeroOneStoredToken(): string | null {
 export function storeZeroOneToken(token: string): void {
   if (typeof window === 'undefined') return;
   safeSet(window.sessionStorage, ZERO_ONE_TOKEN_KEY, token);
+  safeSet(window.localStorage, ZERO_ONE_TOKEN_KEY, token);
 }
 
 export function clearZeroOneToken(): void {
   if (typeof window === 'undefined') return;
   safeRemove(window.sessionStorage, ZERO_ONE_TOKEN_KEY);
+  safeRemove(window.localStorage, ZERO_ONE_TOKEN_KEY);
 }

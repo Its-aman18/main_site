@@ -166,6 +166,7 @@ function App() {
                   <Route path="/achievements" element={withRouteBoundary(<AchievementsPage />)} />
                   <Route path="/achievements/:id" element={withRouteBoundary(<AchievementDetailPage />)} />
                   <Route path="/signin" element={withRouteBoundary(<SignInPage />)} />
+                  <Route path="/login" element={withRouteBoundary(<SignInPage />)} />
                   <Route path="/signup" element={withRouteBoundary(<SignInPage />)} />
                   <Route path="/forgot-password" element={withRouteBoundary(<ResetPasswordPage />)} />
                   <Route path="/reset-password" element={withRouteBoundary(<ResetPasswordPage />)} />

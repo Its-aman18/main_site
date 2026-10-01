@@ -172,7 +172,7 @@ export const DigitalMarketPage: React.FC<DigitalMarketPageProps> = ({ onNavigate
                 {/* Top icon and category */}
                 <div className="flex items-center justify-between mb-3">
                   <div className="w-10 h-10 rounded-2xl bg-stone-100 dark:bg-stone-800 flex items-center justify-center group-hover:scale-105 transition-transform">
-                    {renderItemIcon(item.icon)}
+                    {renderItemIcon(item.icon || '')}
                   </div>
 
                   <span className="text-[11px] font-semibold text-stone-400">

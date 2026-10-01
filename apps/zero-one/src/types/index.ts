@@ -138,7 +138,8 @@ export interface MarketItem {
   };
   visibleFromState: EventStatus;
   status: 'AVAILABLE' | 'OUT_OF_STOCK' | 'LOCKED';
-  icon: string;
+  icon?: string;
+  description?: string;
 }
 
 export interface InventoryItem {
@@ -441,8 +442,18 @@ export type CommandType =
   | 'UPDATE_MARKET_PRICE'
   | 'ADJUST_STOCK'
   | 'ADD_MARKET_ITEM'
+  | 'CREATE_MARKET_ITEM'
+  | 'RECORD_LEDGER_TRANSACTION'
   | 'MANUAL_LEDGER_ADJUSTMENT'
   | 'GRANT_LOAN'
+  | 'EXTEND_CLOCK'
+  | 'RESET_CLOCK'
+  | 'TOGGLE_CLOCK'
+  | 'SET_LOCKDOWN'
+  | 'EXTEND_CRISIS_TIMER'
+  | 'RESOLVE_CRISIS_MANUALLY'
+  | 'REGISTER_TEAM'
+  | 'SET_ROUND'
   | 'CREATE_SNAPSHOT'
   | 'RESTORE_SNAPSHOT'
   | 'RESET_SIMULATION';

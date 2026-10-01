@@ -46,6 +46,9 @@ import {
   CrisisCard,
   AdminPermissionRole,
   AdminAuditLogEntry,
+  Announcement,
+  ArtifactSubmission,
+  StartupCanvas,
 } from '../types';
 import { BOOTSTRAP_ADMIN_EMAIL } from '../services/adminAuthService';
 
@@ -87,7 +90,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     extendCrisisTimer,
     resolveCrisisManually,
     canvas,
+    updateCanvasField,
     artifacts,
+    submitArtifact,
     activeAuction,
     auctionBids,
     openAuction,
@@ -160,12 +165,43 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
   const [reissueTeamId, setReissueTeamId] = useState<string>('team-07');
   const [reissueRole, setReissueRole] = useState<SimulationRole>('CFO');
-  const [reissueName, setReissueName] = useState<string>('Priya Sharma');
+  const [reissueName, setReissueName] = useState<string>('');
+
+  // Crisis Target Team State (Rule 72 & targeted crisis engine)
+  const [selectedCrisisTeamId, setSelectedCrisisTeamId] = useState<string>(teams[0]?.id || 'team-07');
+
+  // Custom Event Duration State
+  const [customClockMinutes, setCustomClockMinutes] = useState<number>(25);
+
+  // Market Item Creation State
+  const [showAddMarketItem, setShowAddMarketItem] = useState<boolean>(false);
+  const [newItemSku, setNewItemSku] = useState<string>('');
+  const [newItemName, setNewItemName] = useState<string>('');
+  const [newItemCategory, setNewItemCategory] = useState<string>('TECH');
+  const [newItemPrice, setNewItemPrice] = useState<number>(25000);
+  const [newItemStock, setNewItemStock] = useState<number>(10);
 
   const [restoreJsonInput, setRestoreJsonInput] = useState<string>('');
   const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
 
   const [auditSearch, setAuditSearch] = useState<string>('');
+
+  // Announcements & Live Screen States
+  const [newAnnType, setNewAnnType] = useState<Announcement['type']>('ALERT');
+  const [liveTickerInput, setLiveTickerInput] = useState<string>(liveScreenConfig?.announcementTickerText || '');
+
+  // Canvas View States
+  const [selectedCanvasTeamId, setSelectedCanvasTeamId] = useState<string>(teams[0]?.id || 'team-07');
+
+  // Artifact Deliverables States
+  const [artifactKindFilter, setArtifactKindFilter] = useState<string>('ALL');
+  const [artifactTeamFilter, setArtifactTeamFilter] = useState<string>('ALL');
+  const [showAddArtifactModal, setShowAddArtifactModal] = useState<boolean>(false);
+  const [newArtTeamId, setNewArtTeamId] = useState<string>(teams[0]?.id || 'team-07');
+  const [newArtKind, setNewArtKind] = useState<ArtifactSubmission['kind']>('PROTOTYPE');
+  const [newArtTitle, setNewArtTitle] = useState<string>('');
+  const [newArtUrl, setNewArtUrl] = useState<string>('');
+  const [newArtDesc, setNewArtDesc] = useState<string>('');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -810,18 +846,55 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
               <div className="pt-4 border-t border-stone-100 dark:border-stone-800 flex flex-wrap items-center gap-3">
                 <button
-                  onClick={() => resetClock(25)}
+                  onClick={toggleClock}
+                  className={`py-2 px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ${
+                    isClockRunning
+                      ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  {isClockRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  {isClockRunning ? 'Pause Clock' : 'Start Clock'}
+                </button>
+                <button
+                  onClick={() => {
+                    resetClock(25);
+                    showToast('Clock reset to 25 minutes');
+                  }}
                   className="btn-secondary py-2 px-4 text-xs font-bold"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  Reset Round Clock (25 Min)
+                  Reset 25 Min
                 </button>
                 <button
-                  onClick={() => resetClock(10)}
+                  onClick={() => {
+                    resetClock(10);
+                    showToast('Clock reset to 10 minutes');
+                  }}
                   className="btn-secondary py-2 px-4 text-xs font-bold"
                 >
                   Set 10 Min Warning
                 </button>
+                <div className="flex items-center gap-1.5 bg-stone-100 dark:bg-stone-800/80 p-1 rounded-xl">
+                  <input
+                    type="number"
+                    min="1"
+                    max="180"
+                    value={customClockMinutes}
+                    onChange={(e) => setCustomClockMinutes(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 text-xs py-1 px-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 font-mono text-center"
+                    placeholder="Mins"
+                  />
+                  <button
+                    onClick={() => {
+                      resetClock(customClockMinutes);
+                      showToast(`Clock reset to ${customClockMinutes} minutes`);
+                    }}
+                    className="btn-secondary py-1 px-3 text-xs font-bold"
+                  >
+                    Set Duration
+                  </button>
+                </div>
                 <button
                   onClick={triggerLockdown}
                   className="btn-danger py-2 px-4 text-xs font-bold ml-auto"
@@ -953,6 +1026,19 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const val = prompt(`Set Health Score (0-100) for ${t.name} (Current: ${t.healthScore}%):`, t.healthScore.toString());
+                          if (val !== null) {
+                            const nh = Math.min(100, Math.max(0, parseInt(val) || 0));
+                            updateTeam(t.id, { healthScore: nh });
+                            showToast(`Updated ${t.name} health to ${nh}%`);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-stone-200 dark:border-stone-700 hover:border-orange-500 text-stone-700 dark:text-stone-300"
+                      >
+                        Set Health
+                      </button>
                       <button
                         onClick={() => {
                           const nextStatus = t.status === 'ACTIVE' ? 'FROZEN' : 'ACTIVE';
@@ -1127,7 +1213,96 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 <h4 className="font-heading font-extrabold text-sm">
                   Active Market Registry ({marketItems.length} SKUs)
                 </h4>
+                <button
+                  onClick={() => setShowAddMarketItem(!showAddMarketItem)}
+                  className="btn-secondary py-1.5 px-3 text-xs font-bold flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {showAddMarketItem ? 'Cancel' : 'Add New Item / SKU'}
+                </button>
               </div>
+
+              {/* Add New Market Item Inline Form */}
+              {showAddMarketItem && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!newItemSku.trim() || !newItemName.trim()) return;
+                    addMarketItem({
+                      sku: newItemSku.trim().toUpperCase(),
+                      name: newItemName.trim(),
+                      category: newItemCategory as any,
+                      basePrice: newItemPrice,
+                      currentPrice: newItemPrice,
+                      priceChangePct: 0,
+                      stockTotal: newItemStock,
+                      stockRemaining: newItemStock,
+                      unlocksDescription: `Administrative market release: ${newItemName}`,
+                      effectSpec: {
+                        boostType: 'MARKET',
+                        value: 10,
+                      },
+                      visibleFromState: 'SETUP',
+                      status: newItemStock > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+                      icon: 'Zap',
+                    });
+                    showToast(`Added market item ${newItemName} (${newItemSku.toUpperCase()})`);
+                    setNewItemSku('');
+                    setNewItemName('');
+                    setShowAddMarketItem(false);
+                  }}
+                  className="p-4 bg-stone-50 dark:bg-stone-900 border-b border-stone-200 dark:border-stone-800 grid grid-cols-1 sm:grid-cols-5 gap-3"
+                >
+                  <input
+                    type="text"
+                    placeholder="SKU (e.g. GPU-H100)"
+                    value={newItemSku}
+                    onChange={(e) => setNewItemSku(e.target.value)}
+                    className="text-xs"
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="Item Name"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    className="text-xs"
+                    required
+                  />
+                  <select
+                    value={newItemCategory}
+                    onChange={(e) => setNewItemCategory(e.target.value)}
+                    className="text-xs"
+                  >
+                    <option value="TECH">TECH</option>
+                    <option value="TALENT">TALENT</option>
+                    <option value="MARKETING">MARKETING</option>
+                    <option value="OPERATIONS">OPERATIONS</option>
+                    <option value="LEGAL">LEGAL</option>
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Price (₹)"
+                    value={newItemPrice}
+                    onChange={(e) => setNewItemPrice(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="text-xs font-mono"
+                    required
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="Stock"
+                      value={newItemStock}
+                      onChange={(e) => setNewItemStock(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-20 text-xs font-mono"
+                      required
+                    />
+                    <button type="submit" className="btn-primary py-1 px-3 text-xs font-bold flex-1">
+                      Save SKU
+                    </button>
+                  </div>
+                </form>
+              )}
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
@@ -1149,12 +1324,44 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         </td>
                         <td className="py-3 px-4 text-stone-500">{item.category}</td>
                         <td className="py-3 px-4 font-mono font-bold text-stone-800 dark:text-stone-200">
-                          ₹{item.currentPrice.toLocaleString('en-IN')}
+                          <div className="flex items-center gap-1.5">
+                            <span>₹{item.currentPrice.toLocaleString('en-IN')}</span>
+                            <button
+                              onClick={() => {
+                                const val = prompt(`Edit price for ${item.name} (Current: ₹${item.currentPrice}):`, item.currentPrice.toString());
+                                if (val !== null) {
+                                  const np = Math.max(0, parseInt(val) || 0);
+                                  updateMarketItem(item.sku, { currentPrice: np });
+                                  showToast(`Updated ${item.name} price to ₹${np.toLocaleString('en-IN')}`);
+                                }
+                              }}
+                              className="p-1 rounded hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+                              title="Edit Price"
+                            >
+                              <Edit className="w-3 h-3" />
+                            </button>
+                          </div>
                         </td>
                         <td className="py-3 px-4 font-mono font-bold">
-                          <span className={item.stockRemaining <= 2 ? 'text-red-500' : 'text-stone-800 dark:text-stone-200'}>
-                            {item.stockRemaining} / {item.stockTotal}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={item.stockRemaining <= 2 ? 'text-red-500' : 'text-stone-800 dark:text-stone-200'}>
+                              {item.stockRemaining} / {item.stockTotal}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const val = prompt(`Set exact stock for ${item.name} (Current: ${item.stockRemaining}):`, item.stockRemaining.toString());
+                                if (val !== null) {
+                                  const ns = Math.max(0, parseInt(val) || 0);
+                                  updateMarketItem(item.sku, { stockRemaining: ns, stockTotal: Math.max(ns, item.stockTotal) });
+                                  showToast(`Updated ${item.name} stock to ${ns}`);
+                                }
+                              }}
+                              className="p-1 rounded hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+                              title="Set Exact Stock"
+                            >
+                              <Edit className="w-3 h-3" />
+                            </button>
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
@@ -1201,6 +1408,27 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 Immediately launches high-attention crisis modal and synchronized countdown timer on targeted devices.
               </p>
 
+              {/* Target Squad Selector */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-100 dark:bg-stone-800/80 p-3.5 rounded-2xl border border-stone-200 dark:border-stone-700">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                  <span className="text-xs font-bold text-stone-700 dark:text-stone-300">
+                    Select Target Squad / Team:
+                  </span>
+                </div>
+                <select
+                  value={selectedCrisisTeamId}
+                  onChange={(e) => setSelectedCrisisTeamId(e.target.value)}
+                  className="text-xs font-semibold py-1.5 px-3 rounded-xl border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200"
+                >
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.teamCode} — {t.name} (Health: {t.healthScore}%, Capital: ₹{getBalance(t.id).toLocaleString('en-IN')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                 {crisisCards.map((card) => (
                   <div
@@ -1218,12 +1446,13 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
                     <button
                       onClick={() => {
-                        dispatchCrisisToTeam('team-07', card.id);
-                        showToast(`Dispatched ${card.title} to Team InnovateX`);
+                        const targetTeam = teams.find((t) => t.id === selectedCrisisTeamId) || teams[0];
+                        dispatchCrisisToTeam(selectedCrisisTeamId, card.id);
+                        showToast(`Dispatched ${card.title} to ${targetTeam ? targetTeam.name : selectedCrisisTeamId}`);
                       }}
                       className="btn-danger w-full py-2 text-xs font-bold mt-3"
                     >
-                      Dispatch Shock →
+                      Dispatch Shock to {teams.find((t) => t.id === selectedCrisisTeamId)?.name || 'Squad'} →
                     </button>
                   </div>
                 ))}
@@ -1326,6 +1555,457 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
         )}
 
         {/* ========================================================================= */}
+        {/* TAB: CANVAS SUBMISSIONS */}
+        {/* ========================================================================= */}
+        {activeTab === 'CANVAS' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Header with Team Switcher */}
+            <div className="card p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                      LEAN STARTUP CANVAS SUBMISSIONS
+                    </h3>
+                    <span className="badge badge-orange text-[10px] font-mono">
+                      ROUND 1 & 2 DELIVERABLE
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Inspect structured venture architecture, validation hypotheses, and cost models across competing squads.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-stone-500">Squad:</span>
+                    <select
+                      value={selectedCanvasTeamId}
+                      onChange={(e) => setSelectedCanvasTeamId(e.target.value)}
+                      className="text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold focus:outline-none focus:border-orange-500"
+                    >
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.teamCode})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(canvas, null, 2));
+                      const a = document.createElement('a');
+                      a.setAttribute('href', dataStr);
+                      a.setAttribute('download', `canvas-${selectedCanvasTeamId}-v${canvas.version || 1}.json`);
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      showToast('Canvas exported to JSON successfully!');
+                    }}
+                    className="btn-secondary py-2 px-3 text-xs flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export JSON</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Banner */}
+              <div className="p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-stone-700 dark:text-stone-300">
+                    Active Version: <strong className="text-orange-600">v{canvas.version || 1}</strong>
+                  </span>
+                  <span className="text-stone-400">•</span>
+                  <span className="text-stone-500">
+                    Last Saved: {canvas.lastSavedAt ? new Date(canvas.lastSavedAt).toLocaleTimeString() : 'Initial'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-stone-500 font-mono">
+                  Sign-off Author: <span className="text-stone-700 dark:text-stone-300 font-bold">{canvas.lastSavedBy || 'Team CEO'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 10 Lean Startup Canvas Building Blocks Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* 1. Problem */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-red-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-red-600 dark:text-red-400">
+                    1. Problem Statement
+                  </span>
+                  <AlertTriangle className="w-4 h-4 text-red-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.problem || 'No problem statement submitted yet.'}
+                </p>
+              </div>
+
+              {/* 2. Customer */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-blue-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                    2. Target Customer Segment
+                  </span>
+                  <Users className="w-4 h-4 text-blue-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.customer || 'No customer profile specified yet.'}
+                </p>
+              </div>
+
+              {/* 3. Solution */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-emerald-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                    3. Solution Architecture
+                  </span>
+                  <CheckCircle className="w-4 h-4 text-emerald-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.solution || 'No solution architecture documented.'}
+                </p>
+              </div>
+
+              {/* 4. USP */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-amber-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                    4. Unique Value Proposition
+                  </span>
+                  <Sparkles className="w-4 h-4 text-amber-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.usp || 'No unique value proposition defined.'}
+                </p>
+              </div>
+
+              {/* 5. Revenue Model */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-green-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-green-600 dark:text-green-400">
+                    5. Revenue Model
+                  </span>
+                  <DollarSign className="w-4 h-4 text-green-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.revenueModel || 'No monetisation mechanics specified.'}
+                </p>
+              </div>
+
+              {/* 6. Cost Structure */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-rose-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                    6. Cost Structure
+                  </span>
+                  <Sliders className="w-4 h-4 text-rose-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.costStructure || 'No breakdown of operational expenses.'}
+                </p>
+              </div>
+
+              {/* 7. Marketing Strategy */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-purple-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                    7. Marketing & Acquisition
+                  </span>
+                  <TrendingUp className="w-4 h-4 text-purple-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.marketingStrategy || 'No go-to-market channels listed.'}
+                </p>
+              </div>
+
+              {/* 8. Competitors */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-cyan-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-cyan-600 dark:text-cyan-400">
+                    8. Competitors & Alternatives
+                  </span>
+                  <ShieldAlert className="w-4 h-4 text-cyan-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.competitors || 'No competitive analysis provided.'}
+                </p>
+              </div>
+
+              {/* 9. Traction */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-teal-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-teal-600 dark:text-teal-400">
+                    9. Early Traction & Evidence
+                  </span>
+                  <FileCheck className="w-4 h-4 text-teal-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
+                  {canvas.traction || 'No validation metrics documented yet.'}
+                </p>
+              </div>
+
+              {/* 10. Assumptions */}
+              <div className="card p-5 space-y-2 border-l-4 border-l-orange-500 md:col-span-2 lg:col-span-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                    10. Critical Business Assumptions & Lethal Risks
+                  </span>
+                  <Lock className="w-4 h-4 text-orange-500/60" />
+                </div>
+                <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans">
+                  {canvas.businessAssumptions || 'No risk assumptions registered.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: PROTOTYPES & DECKS (ARTIFACTS) */}
+        {/* ========================================================================= */}
+        {activeTab === 'ARTIFACTS' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Header & Filter Controls */}
+            <div className="card p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                      PROTOTYPES, DECKS & DELIVERABLES
+                    </h3>
+                    <span className="badge badge-emerald text-[10px] font-mono">
+                      {artifacts.length} REGISTERED
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Deliverable verification registry for digital prototypes, pitch decks, landing pages, and demo recordings.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => setShowAddArtifactModal(true)}
+                    className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Record Marshal Deliverable</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Row */}
+              <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-stone-200 dark:border-stone-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-stone-500">Kind:</span>
+                  <select
+                    value={artifactKindFilter}
+                    onChange={(e) => setArtifactKindFilter(e.target.value)}
+                    className="text-xs py-1.5 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="ALL">All Types</option>
+                    <option value="PROTOTYPE">Prototypes</option>
+                    <option value="PITCH_DECK">Pitch Decks</option>
+                    <option value="LANDING_PAGE">Landing Pages</option>
+                    <option value="DEMO_VIDEO">Demo Videos</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-stone-500">Squad:</span>
+                  <select
+                    value={artifactTeamFilter}
+                    onChange={(e) => setArtifactTeamFilter(e.target.value)}
+                    className="text-xs py-1.5 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="ALL">All Squads</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.teamCode})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal: Record Marshal Deliverable */}
+            {showAddArtifactModal && (
+              <div className="card p-6 border-orange-500/30 space-y-4 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-heading font-black text-sm uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                    RECORD EMERGENCY DELIVERABLE FOR SQUAD
+                  </h4>
+                  <button
+                    onClick={() => setShowAddArtifactModal(false)}
+                    className="text-xs font-mono text-stone-400 hover:text-stone-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">Target Squad</label>
+                    <select
+                      value={newArtTeamId}
+                      onChange={(e) => setNewArtTeamId(e.target.value)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold"
+                    >
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.teamCode})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">Deliverable Kind</label>
+                    <select
+                      value={newArtKind}
+                      onChange={(e) => setNewArtKind(e.target.value as any)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold"
+                    >
+                      <option value="PROTOTYPE">Interactive Prototype</option>
+                      <option value="PITCH_DECK">Pitch Deck / Presentation</option>
+                      <option value="LANDING_PAGE">Landing Page</option>
+                      <option value="DEMO_VIDEO">Recorded Demo Video</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. V1 Production Demo"
+                      value={newArtTitle}
+                      onChange={(e) => setNewArtTitle(e.target.value)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                    >
+                    </input>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">URL / Resource Link</label>
+                    <input
+                      type="url"
+                      placeholder="https://..."
+                      value={newArtUrl}
+                      onChange={(e) => setNewArtUrl(e.target.value)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                    >
+                    </input>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-mono text-stone-500 block mb-1">Brief Description</label>
+                  <input
+                    type="text"
+                    placeholder="Short description of technical architecture or prototype features"
+                    value={newArtDesc}
+                    onChange={(e) => setNewArtDesc(e.target.value)}
+                    className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      if (!newArtTitle.trim() || !newArtUrl.trim()) {
+                        alert('Please specify both title and URL for the deliverable.');
+                        return;
+                      }
+                      submitArtifact({
+                        teamId: newArtTeamId,
+                        kind: newArtKind,
+                        title: newArtTitle.trim(),
+                        url: newArtUrl.trim(),
+                        description: newArtDesc.trim() || 'Verified deliverable submitted via Marshal Control.',
+                        submittedBy: 'Event Marshal (Admin)',
+                      });
+                      setNewArtTitle('');
+                      setNewArtUrl('');
+                      setNewArtDesc('');
+                      setShowAddArtifactModal(false);
+                      showToast('Deliverable successfully recorded in authoritative registry!');
+                    }}
+                    className="btn-primary py-2 px-5 text-xs font-bold"
+                  >
+                    Commit Deliverable
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Artifact Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {artifacts
+                .filter((art) => {
+                  const matchesKind = artifactKindFilter === 'ALL' || art.kind === artifactKindFilter;
+                  const matchesTeam = artifactTeamFilter === 'ALL' || art.teamId === artifactTeamFilter;
+                  return matchesKind && matchesTeam;
+                })
+                .map((art) => {
+                  const squad = teams.find((t) => t.id === art.teamId);
+                  const kindBadgeClass =
+                    art.kind === 'PROTOTYPE'
+                      ? 'badge-emerald'
+                      : art.kind === 'PITCH_DECK'
+                      ? 'badge-orange'
+                      : art.kind === 'LANDING_PAGE'
+                      ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                      : 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+
+                  return (
+                    <div key={art.id} className="card p-5 space-y-3 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`badge text-[10px] font-mono border ${kindBadgeClass}`}>
+                            {art.kind.replace('_', ' ')}
+                          </span>
+                          <span className="text-[10px] font-mono text-stone-400">
+                            {new Date(art.submittedAt).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <h4 className="font-heading font-black text-sm text-stone-900 dark:text-stone-100">
+                          {art.title}
+                        </h4>
+                        <p className="text-xs text-stone-500 leading-relaxed font-sans line-clamp-2">
+                          {art.description}
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-stone-200 dark:border-stone-800 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-mono">
+                          <span className="text-stone-500">Squad:</span>
+                          <span className="font-bold text-stone-800 dark:text-stone-200">
+                            {squad ? `${squad.name} (${squad.teamCode})` : art.teamId}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] font-mono">
+                          <span className="text-stone-500">Submitted By:</span>
+                          <span className="text-stone-600 dark:text-stone-400 font-medium">
+                            {art.submittedBy}
+                          </span>
+                        </div>
+                        <a
+                          href={art.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-secondary w-full py-2 text-xs flex items-center justify-center gap-1.5 font-bold"
+                        >
+                          <span>Open Deliverable</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              {artifacts.length === 0 && (
+                <div className="col-span-full card p-8 text-center text-xs text-stone-400">
+                  No deliverables registered yet. Teams can submit deliverables from their squad portals.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
         {/* TAB: JUDGES & SCORING */}
         {/* ========================================================================= */}
         {activeTab === 'JUDGES' && (
@@ -1381,6 +2061,374 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
         )}
 
         {/* ========================================================================= */}
+        {/* TAB: LIVE SCREEN CONTROL */}
+        {/* ========================================================================= */}
+        {activeTab === 'LIVE_SCREEN' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Header */}
+            <div className="card p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                      LIVE AUDITORIUM SCREEN CONTROLS
+                    </h3>
+                    <span className="badge badge-orange text-[10px] font-mono">
+                      PROJECTOR OUTPUT
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Control what attendees, mentors, and competing founders see on the main auditorium stage display.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <a
+                    href="/live.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 font-bold"
+                  >
+                    <Tv className="w-3.5 h-3.5" />
+                    <span>Launch Stage Display</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Presentation Mode Selector */}
+            <div className="card p-6 space-y-4">
+              <h4 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                1. Stage Presentation Mode
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  {
+                    mode: 'NORMAL',
+                    title: 'Standard Round Mode',
+                    desc: 'Live countdown, active economy ticker, and squad telemetry.',
+                    color: 'orange',
+                  },
+                  {
+                    mode: 'LOCKDOWN',
+                    title: 'Emergency Lockdown',
+                    desc: 'Full-screen red alert, frozen market trades, crisis warnings.',
+                    color: 'red',
+                  },
+                  {
+                    mode: 'QUALIFIERS',
+                    title: 'Finalist Leaderboard',
+                    desc: 'Focus on top ranking squads qualifying for final pitch.',
+                    color: 'emerald',
+                  },
+                  {
+                    mode: 'REVEAL',
+                    title: 'Awards Podium Reveal',
+                    desc: 'Dramatic award presentation mode with podium highlights.',
+                    color: 'purple',
+                  },
+                ].map((item) => {
+                  const isSelected = (liveScreenConfig?.presentationMode || 'NORMAL') === item.mode;
+                  return (
+                    <button
+                      key={item.mode}
+                      onClick={() => {
+                        updateLiveScreenConfig({ presentationMode: item.mode as any });
+                        showToast(`Switched stage presentation mode to ${item.mode}`);
+                      }}
+                      className={`p-4 rounded-2xl text-left border transition-all ${
+                        isSelected
+                          ? 'border-orange-500 bg-orange-500/10 shadow-md ring-1 ring-orange-500/50'
+                          : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700 bg-stone-50 dark:bg-stone-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-black font-heading text-stone-900 dark:text-stone-100">
+                          {item.title}
+                        </span>
+                        {isSelected && <Check className="w-4 h-4 text-orange-600" />}
+                      </div>
+                      <p className="text-[11px] text-stone-500 leading-relaxed font-sans">{item.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Overlay Toggles & Ticker */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Overlay Visibility Toggles */}
+              <div className="card p-6 space-y-4">
+                <h4 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                  2. Dynamic Overlay Toggles
+                </h4>
+                <div className="space-y-3">
+                  <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-stone-900 dark:text-stone-100 block">
+                        Leaderboard Overlay
+                      </span>
+                      <span className="text-[11px] text-stone-500">
+                        Show top squad valuation rankings on the left rail
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const newVal = !liveScreenConfig.showLeaderboard;
+                        updateLiveScreenConfig({ showLeaderboard: newVal });
+                        showToast(`Leaderboard overlay ${newVal ? 'enabled' : 'hidden'}`);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                        liveScreenConfig.showLeaderboard
+                          ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                          : 'bg-stone-200 dark:bg-stone-800 text-stone-500'
+                      }`}
+                    >
+                      {liveScreenConfig.showLeaderboard ? 'VISIBLE' : 'HIDDEN'}
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-stone-900 dark:text-stone-100 block">
+                        Crisis Telemetry Grid
+                      </span>
+                      <span className="text-[11px] text-stone-500">
+                        Display active emergency threats and response countdowns
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const newVal = !liveScreenConfig.showCrisisGrid;
+                        updateLiveScreenConfig({ showCrisisGrid: newVal });
+                        showToast(`Crisis grid overlay ${newVal ? 'enabled' : 'hidden'}`);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                        liveScreenConfig.showCrisisGrid
+                          ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                          : 'bg-stone-200 dark:bg-stone-800 text-stone-500'
+                      }`}
+                    >
+                      {liveScreenConfig.showCrisisGrid ? 'VISIBLE' : 'HIDDEN'}
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-stone-900 dark:text-stone-100 block">
+                        Market Price Ticker
+                      </span>
+                      <span className="text-[11px] text-stone-500">
+                        Display bottom scrolling ticker of cloud and talent prices
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const newVal = !liveScreenConfig.showMarketTicker;
+                        updateLiveScreenConfig({ showMarketTicker: newVal });
+                        showToast(`Market ticker overlay ${newVal ? 'enabled' : 'hidden'}`);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                        liveScreenConfig.showMarketTicker
+                          ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                          : 'bg-stone-200 dark:bg-stone-800 text-stone-500'
+                      }`}
+                    >
+                      {liveScreenConfig.showMarketTicker ? 'VISIBLE' : 'HIDDEN'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ticker Banner Text Editor */}
+              <div className="card p-6 space-y-4">
+                <h4 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                  3. Stage Ticker Banner Text
+                </h4>
+                <div className="space-y-3">
+                  <textarea
+                    rows={3}
+                    placeholder="Enter broadcast message scrolling across bottom of live screen..."
+                    value={liveTickerInput}
+                    onChange={(e) => setLiveTickerInput(e.target.value)}
+                    className="w-full text-xs p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 focus:outline-none focus:border-orange-500 font-mono"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        'ROUND 2 ACTIVE • DIGITAL MARKET OPEN',
+                        'CRISIS ALERT • CHECK TERMINALS NOW',
+                        'FINAL 5 MINUTES • SUBMIT DELIVERABLES',
+                      ].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setLiveTickerInput(preset)}
+                          className="px-2 py-1 text-[10px] rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-orange-500 font-mono"
+                        >
+                          {preset.split('•')[0]}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        updateLiveScreenConfig({ announcementTickerText: liveTickerInput.trim() });
+                        showToast('Live stage ticker text updated successfully!');
+                      }}
+                      className="btn-primary py-2 px-4 text-xs font-bold"
+                    >
+                      Update Ticker
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: ANNOUNCEMENTS */}
+        {/* ========================================================================= */}
+        {activeTab === 'ANNOUNCEMENTS' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* Header */}
+            <div className="card p-6 space-y-2">
+              <div className="flex items-center gap-2">
+                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
+                  EVENT ANNOUNCEMENTS & LIVE BROADCAST
+                </h3>
+                <span className="badge badge-orange text-[10px] font-mono">
+                  PUSH TELEMETRY
+                </span>
+              </div>
+              <p className="text-xs text-stone-500">
+                Broadcast urgent instructions, market fluctuations, and phase transitions directly to squad heads-up displays.
+              </p>
+            </div>
+
+            {/* Broadcast Form */}
+            <div className="card p-6 space-y-4 border-orange-500/20">
+              <h4 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                Compose New Live Broadcast
+              </h4>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">
+                      Announcement Headline
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Round 2 Ending in 10 Minutes — Finalize Pitch Decks!"
+                      value={newAnnTitle}
+                      onChange={(e) => setNewAnnTitle(e.target.value)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-mono text-stone-500 block mb-1">
+                      Urgency Classification
+                    </label>
+                    <select
+                      value={newAnnType}
+                      onChange={(e) => setNewAnnType(e.target.value as any)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-bold"
+                    >
+                      <option value="INFO">INFO (General Notice)</option>
+                      <option value="ALERT">ALERT (Attention Required)</option>
+                      <option value="CRISIS">CRISIS (Emergency Threat)</option>
+                      <option value="ROUND_CHANGE">ROUND CHANGE (State Transition)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-stone-500 block mb-1">
+                    Announcement Body
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Detailed explanation, instructions, or operational directives for competing squads..."
+                    value={newAnnContent}
+                    onChange={(e) => setNewAnnContent(e.target.value)}
+                    className="w-full text-xs p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 focus:outline-none focus:border-orange-500 font-sans"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      if (!newAnnTitle.trim() || !newAnnContent.trim()) {
+                        alert('Please fill out both headline and content before broadcasting.');
+                        return;
+                      }
+                      addAnnouncement(newAnnTitle.trim(), newAnnContent.trim(), newAnnType);
+                      setNewAnnTitle('');
+                      setNewAnnContent('');
+                      showToast('Live announcement pushed to all squad devices!');
+                    }}
+                    className="btn-primary py-2.5 px-6 text-xs font-bold flex items-center gap-2"
+                  >
+                    <Radio className="w-4 h-4" />
+                    <span>Broadcast to All Devices</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Historical Announcements Feed */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-heading font-black text-sm uppercase tracking-wider text-stone-800 dark:text-stone-200">
+                  Broadcast History ({announcements.length})
+                </h4>
+              </div>
+              <div className="space-y-3">
+                {announcements.map((ann) => {
+                  const typeClass =
+                    ann.type === 'CRISIS'
+                      ? 'border-l-red-500 bg-red-500/5'
+                      : ann.type === 'ROUND_CHANGE'
+                      ? 'border-l-emerald-500 bg-emerald-500/5'
+                      : ann.type === 'ALERT'
+                      ? 'border-l-amber-500 bg-amber-500/5'
+                      : 'border-l-blue-500 bg-blue-500/5';
+
+                  return (
+                    <div
+                      key={ann.id}
+                      className={`p-4 rounded-xl border border-stone-200 dark:border-stone-800 border-l-4 ${typeClass} space-y-1.5`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300">
+                            {ann.type}
+                          </span>
+                          <span className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                            {ann.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-stone-400">
+                          {new Date(ann.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+                        {ann.content}
+                      </p>
+                    </div>
+                  );
+                })}
+                {announcements.length === 0 && (
+                  <div className="p-6 text-center text-xs text-stone-400">
+                    No announcements broadcast yet. Use the form above to dispatch messages to all squad screens.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
         {/* TAB: AUDIT LOGS */}
         {/* ========================================================================= */}
         {activeTab === 'AUDIT' && (
@@ -1430,7 +2478,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
         {/* ========================================================================= */}
         {activeTab === 'ADMIN_VERIFICATION' && (
           <div className="space-y-6 animate-in fade-in duration-150">
-            {!isSuperAdmin() ? (
+            {!isSuperAdmin() && !isAdminVerified() ? (
               <div className="card p-8 text-center space-y-4 border-amber-500/30">
                 <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
                   <ShieldAlert className="w-8 h-8" />

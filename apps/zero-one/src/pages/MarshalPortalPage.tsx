@@ -12,7 +12,7 @@ export const MarshalPortalPage: React.FC<MarshalPortalPageProps> = ({ onNavigate
 
   const [selectedTeamId, setSelectedTeamId] = useState<string>('team-07');
   const [selectedRole, setSelectedRole] = useState<SimulationRole>('CFO');
-  const [targetStudentName, setTargetStudentName] = useState<string>('Priya Sharma');
+  const [targetStudentName, setTargetStudentName] = useState<string>('');
   const [reissueSuccessMsg, setReissueSuccessMsg] = useState<string | null>(null);
 
   const handleReissue = (e: React.FormEvent) => {
