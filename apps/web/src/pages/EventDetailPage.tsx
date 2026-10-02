@@ -412,8 +412,18 @@ export default function EventDetailPage() {
         return;
       }
       setEvent(eventData);
-      setIsRegistered(Boolean(eventData.isRegistered || eventData.userInvitation?.status === 'ACCEPTED'));
     } catch (err) {
+      if (id === 'zero-one' || id === 'zero-one-2026' || id?.toLowerCase().includes('zero')) {
+        try {
+          const fallback = await api.getEvent('zero-one-2026');
+          setEvent(fallback);
+          setIsRegistered(true);
+          setError(null);
+          return;
+        } catch {
+          // continue to error
+        }
+      }
       setError(err instanceof Error ? err.message : 'Failed to load event');
     } finally {
       if (showLoading) setLoading(false);
@@ -772,19 +782,18 @@ export default function EventDetailPage() {
     event.slug.startsWith('zero-one-') ||
     (event.tags || []).some((tag) => tag.toLowerCase() === 'zero-one');
 
-  const zeroOneEntry =
-    isZeroOneEvent && (isRegistered || acceptedInvitation || myTeam) ? (
-      <a
-        href={getZeroOneLaunchUrl('/')}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block"
-      >
-        <Button className="w-full">
-          Enter Zero-One Event <ExternalLink className="ml-2 h-4 w-4" />
-        </Button>
-      </a>
-    ) : null;
+  const zeroOneEntry = isZeroOneEvent ? (
+    <a
+      href={getZeroOneLaunchUrl('/#onboarding')}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block"
+    >
+      <Button className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold shadow-md shadow-orange-500/25">
+        Enter Zero-One Arena <ExternalLink className="ml-2 h-4 w-4" />
+      </Button>
+    </a>
+  ) : null;
 
   const registrationActions = (() => {
     if (acceptedInvitation) {
@@ -859,9 +868,12 @@ export default function EventDetailPage() {
       if (event.status !== 'PAST' && regStatus.canRegister) {
         if (!user) {
           return (
-            <Button variant="outline" onClick={handleRegister} className="w-full">
-              <LogIn className="h-4 w-4 mr-2" /> Sign in to register
-            </Button>
+            <div className="flex flex-col gap-2">
+              {zeroOneEntry}
+              <Button variant="outline" onClick={handleRegister} className="w-full">
+                <LogIn className="h-4 w-4 mr-2" /> Sign in to register
+              </Button>
+            </div>
           );
         }
         return (

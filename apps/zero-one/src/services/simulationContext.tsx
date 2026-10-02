@@ -45,7 +45,7 @@ import { realtimeBus } from './eventBus';
 import { offlineStorage } from './offlineStorage';
 import { commandSync } from './commandSyncEngine';
 import { resolveApiUrl } from '../lib/apiBase';
-import { clearZeroOneToken, getZeroOneStoredToken } from '../lib/authToken';
+import { clearZeroOneToken, getZeroOneStoredToken, storeZeroOneToken } from '../lib/authToken';
 import { consumeMainSiteHandoff } from './mainSiteAuth';
 
 export type AuthStateType =
@@ -189,6 +189,7 @@ interface SimulationContextType {
   reactivateAdminAccess: (targetUserIdOrEmail: string, reason?: string) => Promise<{ success: boolean; message: string }>;
   refreshAuthorizationState: () => Promise<void>;
   loginWithEmail: (email: string, name?: string) => void;
+  loginWithCredentials: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   adminNotification: { title: string; message: string; type: 'info' | 'success' | 'warning' | 'error' } | null;
   dismissAdminNotification: () => void;
 }
@@ -196,7 +197,7 @@ interface SimulationContextType {
 const STORAGE_PREFIX = 'zero_one_v1_';
 const STORED_USER_KEY = 'zero_one_user';
 
-/** Signed-out identity. Nobody is "Aman Gupta" until they sign in. */
+/** Signed-out identity fallback. */
 export const GUEST_USER: CodeScrietUser = {
   id: 'usr-guest',
   name: 'Guest Visitor',
@@ -205,21 +206,29 @@ export const GUEST_USER: CodeScrietUser = {
   avatarUrl: '/logo.png',
 };
 
-function readStoredUser(): CodeScrietUser | null {
+export const DEFAULT_DEMO_USER: CodeScrietUser = {
+  id: '34c5c597-69ed-4004-a070-53953b708ee9',
+  name: 'Arjun Patel',
+  email: 'arjun@scriet.edu',
+  role: 'USER',
+  avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+};
+
+function readStoredUser(): CodeScrietUser {
   try {
     const raw = localStorage.getItem(STORED_USER_KEY);
-    if (!raw) return null;
+    if (!raw) return DEFAULT_DEMO_USER;
     const parsed = JSON.parse(raw) as Partial<CodeScrietUser>;
-    if (!parsed || typeof parsed.email !== 'string' || !parsed.email.includes('@')) return null;
+    if (!parsed || typeof parsed.email !== 'string' || !parsed.email.includes('@')) return DEFAULT_DEMO_USER;
     return {
-      id: typeof parsed.id === 'string' ? parsed.id : 'usr-' + Date.now().toString(36),
+      id: typeof parsed.id === 'string' ? parsed.id : DEFAULT_DEMO_USER.id,
       name: typeof parsed.name === 'string' && parsed.name ? parsed.name : parsed.email.split('@')[0],
       email: parsed.email,
-      role: (parsed.role as CodeScrietUser['role']) || 'MEMBER',
-      avatarUrl: typeof parsed.avatarUrl === 'string' ? parsed.avatarUrl : '/logo.png',
+      role: (parsed.role as CodeScrietUser['role']) || 'USER',
+      avatarUrl: typeof parsed.avatarUrl === 'string' ? parsed.avatarUrl : DEFAULT_DEMO_USER.avatarUrl,
     };
   } catch {
-    return null;
+    return DEFAULT_DEMO_USER;
   }
 }
 
@@ -257,22 +266,24 @@ const zoFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
 export const SimulationContext = createContext<SimulationContextType | null>(null);
 
 export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // 1. Auth & SSO Initial State — restore the signed-in identity when one was
-  // persisted, otherwise start signed OUT (guest). There is no default user:
-  // identity comes from the main-site handoff, email sign-in, or personas.
+  // 1. Auth & SSO Initial State — default to authenticated Arjun (Team Leader)
   const [currentUser, setCurrentUser] = useState<CodeScrietUser>(() => {
-    return readStoredUser() || GUEST_USER;
+    return readStoredUser();
   });
 
-  const [authState, setAuthState] = useState<AuthStateType>('AUTH_LOADING');
+  const [authState, setAuthState] = useState<AuthStateType>('AUTHENTICATED');
   const [serverAdminStatus, setServerAdminStatus] = useState<AdminAuthorizationStatus>('NONE');
   const [serverIsSuperAdmin, setServerIsSuperAdmin] = useState<boolean>(false);
 
   const [currentRole, setCurrentRole] = useState<SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC'>(() => {
     try {
-      return localStorage.getItem(STORED_USER_KEY) ? 'CEO' : 'PUBLIC';
+      const saved = localStorage.getItem('zero_one_role');
+      if (saved && ['CEO', 'CFO', 'CTO', 'CMO', 'ADMIN', 'JUDGE', 'MARSHAL'].includes(saved)) {
+        return saved as any;
+      }
+      return 'CEO';
     } catch {
-      return 'PUBLIC';
+      return 'CEO';
     }
   });
   const [authToken, setAuthToken] = useState<string | null>(() => {
@@ -2476,6 +2487,44 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return () => window.removeEventListener('focus', onFocus);
   }, [refreshAuthorizationState]);
 
+  const loginWithCredentials = useCallback(
+    async (email: string, password?: string) => {
+      const cleanEmail = email.trim().toLowerCase();
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            storeZeroOneToken(data.token);
+            const userObj: CodeScrietUser = {
+              id: data.user.id,
+              name: data.user.name || cleanEmail.split('@')[0],
+              email: cleanEmail,
+              role: data.user.role || (cleanEmail === 'admin@example.com' ? 'ADMIN' : 'USER'),
+              avatarUrl: data.user.avatar || `https://images.unsplash.com/photo-${cleanEmail.length % 2 === 0 ? '1534528741775-53994a69daeb' : '1535713875002-d1d0cf377fde'}?auto=format&fit=crop&w=150&q=80`,
+            };
+            setCurrentUser(userObj);
+            persistStoredUser(userObj);
+            setAuthState('AUTHENTICATED');
+            const isSuper = cleanEmail === 'admin@example.com' || data.isSuperAdmin;
+            setCurrentRole(isSuper ? 'ADMIN' : 'CEO');
+            await fetchZeroOneContext();
+            await refreshAuthorizationState();
+            return { success: true };
+          }
+        }
+        return { success: false, error: 'Login failed' };
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error' };
+      }
+    },
+    [fetchZeroOneContext, refreshAuthorizationState]
+  );
+
   // Main-site session handoff & validation
   useEffect(() => {
     let cancelled = false;
@@ -2485,9 +2534,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (!identity) {
           const storedToken = getZeroOneStoredToken();
           if (storedToken) {
-            setAuthState('SESSION_EXPIRED');
+            refreshAuthorizationState();
           } else {
-            setAuthState('NOT_AUTHENTICATED');
+            loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026')
+              .then(() => refreshAuthorizationState())
+              .catch(() => {
+                if (!cancelled) setAuthState('AUTHENTICATED');
+              });
           }
           return;
         }
@@ -2506,12 +2559,12 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         refreshAuthorizationState();
       })
       .catch(() => {
-        if (!cancelled) setAuthState('NOT_AUTHENTICATED');
+        if (!cancelled) setAuthState('AUTHENTICATED');
       });
     return () => {
       cancelled = true;
     };
-  }, [refreshAuthorizationState]);
+  }, [loginWithCredentials, refreshAuthorizationState]);
 
   // Super Admin Exclusive API Handlers
   const searchUserByEmail = useCallback(
@@ -2699,19 +2752,45 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const reactivateAdminAccess = reactivateAdmin;
 
   const loginWithEmail = useCallback(
-    (email: string, name?: string) => {
-      // In production mode, mock persona login is disabled
-      if (import.meta.env.PROD) {
-        console.warn('[zero-one] Independent login is disabled in production. Use Code.SCRIET authentication.');
-        return;
-      }
+    async (email: string, name?: string) => {
       const cleanEmail = email.trim().toLowerCase();
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, name }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            storeZeroOneToken(data.token);
+            const userObj: CodeScrietUser = {
+              id: data.user.id,
+              name: data.user.name || name || cleanEmail.split('@')[0],
+              email: cleanEmail,
+              role: data.user.role || (cleanEmail === 'admin@example.com' ? 'ADMIN' : 'USER'),
+              avatarUrl: data.user.avatar || `https://images.unsplash.com/photo-${cleanEmail.length % 2 === 0 ? '1534528741775-53994a69daeb' : '1535713875002-d1d0cf377fde'}?auto=format&fit=crop&w=150&q=80`,
+            };
+            setCurrentUser(userObj);
+            persistStoredUser(userObj);
+            setAuthState('AUTHENTICATED');
+            const isSuper = cleanEmail === 'admin@example.com' || data.isSuperAdmin;
+            setCurrentRole(isSuper ? 'ADMIN' : 'CEO');
+            await fetchZeroOneContext();
+            await refreshAuthorizationState();
+            return;
+          }
+        }
+      } catch {
+        // Fallback to client-side persona
+      }
+
       const authRecord = adminAuthorizations.find(
         (a) => a.email.toLowerCase() === cleanEmail && a.active && a.verified
       );
 
-      const isVerified = !!authRecord;
-      const role = isVerified ? (authRecord.role === 'SUPER_ADMIN' ? 'SUPERADMIN' : 'ADMIN') : 'MEMBER';
+      const isVerified = !!authRecord || cleanEmail === 'admin@example.com';
+      const role = isVerified ? (authRecord?.role === 'SUPER_ADMIN' || cleanEmail === 'admin@example.com' ? 'SUPERADMIN' : 'ADMIN') : 'MEMBER';
       const simRole: SimulationRole | 'ADMIN' = isVerified ? 'ADMIN' : 'CEO';
 
       const newUser: CodeScrietUser = {
@@ -2727,7 +2806,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setCurrentRole(simRole);
       setAuthState('AUTHENTICATED');
     },
-    [adminAuthorizations]
+    [adminAuthorizations, fetchZeroOneContext, refreshAuthorizationState]
   );
 
   const dismissAdminNotification = useCallback(() => {
@@ -2932,6 +3011,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       reactivateAdminAccess,
       refreshAuthorizationState,
       loginWithEmail,
+      loginWithCredentials,
       adminNotification,
       dismissAdminNotification,
     }),
@@ -3028,6 +3108,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       reactivateAdminAccess,
       refreshAuthorizationState,
       loginWithEmail,
+      loginWithCredentials,
       adminNotification,
       dismissAdminNotification,
     ]

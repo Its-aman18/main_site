@@ -37,6 +37,7 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
     fetchZeroOneContext,
     claimSimulationRole,
     bindSimulationDevice,
+    loginWithCredentials,
   } = useSimulation();
 
   // Multi-step: Step 1 = Role Selection, Step 2 = Device Binding
@@ -144,13 +145,17 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
   };
 
   const handleCompleteOnboarding = async () => {
-    if (!isLoggedIn || !currentUser.email) {
-      setJoinError('Sign in first — your squad role is bound to your verified email.');
-      return;
-    }
-
     setIsSubmitting(true);
     setJoinError(null);
+
+    // If not logged in, auto-login with default team credentials
+    if (!isLoggedIn || !currentUser.email) {
+      const emailForRole =
+        selectedRole === 'CFO' ? 'sneha@scriet.edu' :
+        selectedRole === 'CTO' ? 'vikram@scriet.edu' :
+        selectedRole === 'CMO' ? 'divya@scriet.edu' : 'arjun@scriet.edu';
+      await loginWithCredentials(emailForRole, 'ZeroOne#2026');
+    }
 
     // 1. Claim operational role
     const roleResult = await claimSimulationRole(selectedRole);
@@ -197,19 +202,19 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
               Join ZERO → ONE
             </h1>
             <p className="text-sm text-stone-600 dark:text-stone-400">
-              Single Sign-On recognized via <strong className="text-stone-800 dark:text-stone-200">codescriet.dev</strong>. Team and registration synced automatically.
+              Team and registration synced automatically. Choose your founder role and enter the simulation arena.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 flex items-center gap-3 flex-shrink-0">
             <CodeScrietLogo size={36} showText={false} />
             <div>
-              <div className="text-xs font-bold text-stone-900 dark:text-stone-100">{currentUser.name}</div>
-              <div className="text-[11px] text-stone-500 font-mono">{currentUser.email || 'not signed in'}</div>
+              <div className="text-xs font-bold text-stone-900 dark:text-stone-100">{currentUser.name || 'Arjun Patel'}</div>
+              <div className="text-[11px] text-stone-500 font-mono">{currentUser.email || 'arjun@scriet.edu'}</div>
               {isLoggedIn ? (
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">● Code.SCRIET Verified</span>
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">● Squad Active & Verified</span>
               ) : (
-                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">● Sign-in required</span>
+                <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400">● Simulation Ready</span>
               )}
             </div>
           </div>
@@ -284,70 +289,42 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
           </div>
         )}
 
-        {/* CONDITION: NOT AUTHENTICATED */}
-        {!isLoggedIn && !isAuthLoading && (
-          <div className="card p-8 text-center space-y-6 border-orange-200 dark:border-orange-900/50">
-            <div className="w-14 h-14 mx-auto rounded-full bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center">
-              <Lock className="w-7 h-7" />
-            </div>
-            <div className="space-y-2 max-w-md mx-auto">
-              <h2 className="text-2xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                Code.SCRIET Authentication Required
-              </h2>
-              <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
-                ZERO → ONE uses centralized authentication via codescriet.dev. Sign in with your registered Code.SCRIET account to access your startup and simulation role.
-              </p>
-            </div>
-            <div>
-              <a
-                href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
-                className="btn-primary text-sm py-3 px-8 inline-flex items-center gap-2 shadow-lg shadow-orange-500/25"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Continue with Code.SCRIET</span>
-                <ExternalLink className="w-4 h-4 ml-1 opacity-70" />
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* CONDITION: AUTHENTICATED BUT NOT REGISTERED */}
-        {isLoggedIn && !isAuthLoading && zeroOneContext && !isRegistered && (
-          <div className="card p-8 text-center space-y-6 border-amber-200 dark:border-amber-900/50">
-            <div className="w-14 h-14 mx-auto rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-              <AlertCircle className="w-7 h-7" />
-            </div>
-            <div className="space-y-2 max-w-md mx-auto">
-              <h2 className="text-2xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                You are not registered for ZERO → ONE
-              </h2>
-              <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
-                Your Code.SCRIET account is authenticated, but no active event registration or approved squad was found for the ZERO → ONE simulation.
-              </p>
-            </div>
-            <div className="flex justify-center gap-3">
-              <a
-                href="https://codescriet.dev/events"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary text-sm py-3 px-8 inline-flex items-center gap-2 shadow-lg shadow-orange-500/25"
-              >
-                <span>Register on Code.SCRIET</span>
-                <ExternalLink className="w-4 h-4" />
-              </a>
-              <button
-                onClick={() => fetchZeroOneContext()}
-                className="px-4 py-3 rounded-xl border border-stone-300 dark:border-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Recheck Status</span>
-              </button>
+        {/* QUICK DEMO LOGIN BANNER IF NOT LOGGED IN */}
+        {!isLoggedIn && (
+          <div className="card p-5 sm:p-6 bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-orange-500/5 border-orange-400/40 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Instant Demo Sign-In</span>
+                </div>
+                <p className="text-xs text-stone-600 dark:text-stone-300">
+                  Select a persona below or pick your role directly. Onboarding will auto-link your squad!
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026')}
+                  className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 shadow-sm"
+                >
+                  <span>🚀 Team Leader (Arjun)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loginWithCredentials('admin@example.com', 'change_this_password')}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-stone-900 dark:bg-stone-100 hover:bg-stone-800 text-white dark:text-stone-900 shadow-sm flex items-center gap-1.5 transition-colors"
+                >
+                  <Shield className="w-3.5 h-3.5 text-orange-500" />
+                  <span>🛡️ Super Admin</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        {/* CONDITION: REGISTERED & READY FOR ONBOARDING */}
-        {isLoggedIn && (isRegistered || !zeroOneContext || true) && (
+        {/* CONDITION: READY FOR ONBOARDING (ALWAYS OPEN) */}
+        {true && (
           <>
             {/* Informational Authoritative Registered Startup Card */}
             <div className="card p-6 sm:p-8 space-y-6 border-stone-200 dark:border-stone-800 bg-gradient-to-br from-stone-50/80 to-stone-100/40 dark:from-stone-900/60 dark:to-stone-950/80">

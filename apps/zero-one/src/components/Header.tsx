@@ -48,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
     isSuperAdmin,
     logout,
     isLoggedIn,
+    loginWithCredentials,
     adminNotification,
     dismissAdminNotification,
   } = useSimulation();
@@ -271,15 +272,27 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
             {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-stone-700" />}
           </button>
 
-          {/* Role Switcher & Profile Dropdown (signed in) / Continue with Code.SCRIET (guest) */}
+          {/* Role Switcher & Profile Dropdown (signed in) / 1-Click Quick Login (guest) */}
           {!isLoggedIn ? (
-            <a
-              href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-sm transition-colors cursor-pointer"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Continue with Code.SCRIET</span>
-            </a>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-sm transition-colors cursor-pointer"
+                title="Log in as Arjun Patel (TechNova CEO)"
+              >
+                <span>🚀 Team Login</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => loginWithCredentials('admin@example.com', 'change_this_password')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-stone-900 dark:bg-stone-100 hover:bg-stone-800 text-white dark:text-stone-900 shadow-sm transition-colors cursor-pointer"
+                title="Log in as Super Admin"
+              >
+                <Shield className="w-3.5 h-3.5 text-orange-500" />
+                <span>Admin</span>
+              </button>
+            </div>
           ) : (
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
@@ -452,13 +465,29 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
       {isMobileMenuOpen && (
         <div className="lg:hidden border-t border-stone-200 dark:border-stone-800 bg-[#FAF8F5] dark:bg-[#07080B] px-4 pt-3 pb-5 space-y-2">
           {!isLoggedIn && (
-            <a
-              href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
-              className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold bg-orange-600 hover:bg-orange-500 text-white flex items-center gap-2 mb-2"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Continue with Code.SCRIET</span>
-            </a>
+            <div className="flex flex-col gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold bg-orange-600 hover:bg-orange-500 text-white flex items-center gap-2"
+              >
+                <span>🚀 Team Login (Arjun - TechNova)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  loginWithCredentials('admin@example.com', 'change_this_password');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 flex items-center gap-2"
+              >
+                <Shield className="w-4 h-4 text-orange-500" />
+                <span>Super Admin (admin@example.com)</span>
+              </button>
+            </div>
           )}
           <button
             onClick={() => {

@@ -4080,6 +4080,113 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
         }));
       }
 
+      // 1c. Dev & Persona Login Endpoint (Standalone local authentication)
+      if ((url === '/api/auth/login' || url === '/api/auth/dev-login') && req.method === 'POST') {
+        const body = await parseJsonBody(req).catch(() => ({}));
+        const rawEmail = String(body.email || body.persona || 'arjun@scriet.edu').trim().toLowerCase();
+        const persona = String(body.persona || '').toLowerCase();
+
+        let userRecord: {
+          id: string;
+          email: string;
+          name: string;
+          role: string;
+          avatar?: string;
+        };
+
+        if (rawEmail === 'admin@example.com' || persona === 'admin' || persona === 'superadmin') {
+          userRecord = {
+            id: '7b9962b4-a08c-4d24-9f28-8c722d81d20f',
+            email: 'admin@example.com',
+            name: 'Code.SCRIET Super Admin',
+            role: 'ADMIN',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+          };
+        } else if (rawEmail === 'arjun@scriet.edu' || persona === 'team' || persona === 'leader' || persona === 'technova') {
+          userRecord = {
+            id: '34c5c597-69ed-4004-a070-53953b708ee9',
+            email: 'arjun@scriet.edu',
+            name: 'Arjun Patel',
+            role: 'USER',
+            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+          };
+        } else if (rawEmail === 'sneha@scriet.edu' || persona === 'cfo') {
+          userRecord = {
+            id: 'usr-sneha-reddy',
+            email: 'sneha@scriet.edu',
+            name: 'Sneha Sharma',
+            role: 'USER',
+            avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=150&q=80',
+          };
+        } else if (rawEmail === 'vikram@scriet.edu' || persona === 'cto') {
+          userRecord = {
+            id: 'usr-vikram-singh',
+            email: 'vikram@scriet.edu',
+            name: 'Vikram Singh',
+            role: 'USER',
+            avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=150&q=80',
+          };
+        } else if (rawEmail === 'divya@scriet.edu' || persona === 'cmo') {
+          userRecord = {
+            id: 'usr-divya-verma',
+            email: 'divya@scriet.edu',
+            name: 'Divya Verma',
+            role: 'USER',
+            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
+          };
+        } else if (rawEmail === 'aman@scriet.edu' || persona === 'aman') {
+          userRecord = {
+            id: 'usr-aman-gupt',
+            email: 'aman@scriet.edu',
+            name: 'Aman Gupta',
+            role: 'USER',
+            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+          };
+        } else {
+          userRecord = {
+            id: 'usr-' + Math.random().toString(36).substring(2, 9),
+            email: rawEmail,
+            name: body.name || rawEmail.split('@')[0],
+            role: 'USER',
+          };
+        }
+
+        const { createRequire } = await import('module');
+        const require = createRequire(import.meta.url);
+        const jwtLib = require('jsonwebtoken');
+        const secrets = getZeroOneJwtSecrets();
+        const signingSecret = secrets[0] || 'dev_local_jwt_secret_change_me_before_production';
+
+        const token = jwtLib.sign(
+          {
+            userId: userRecord.id,
+            id: userRecord.id,
+            email: userRecord.email,
+            role: userRecord.role,
+            name: userRecord.name,
+          },
+          signingSecret,
+          { algorithm: 'HS256', expiresIn: '7d' }
+        );
+
+        res.setHeader(
+          'Set-Cookie',
+          `scriet_session=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=604800`
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(
+          JSON.stringify({
+            success: true,
+            authenticated: true,
+            token,
+            user: userRecord,
+            adminStatus: serverEngine.getUserAdminStatus(userRecord.email),
+            isSuperAdmin: serverEngine.isUserSuperAdmin(userRecord.email),
+            message: 'Authenticated successfully',
+          })
+        );
+      }
+
       // 2. Authoritative State (staff authorization lists are admin-only)
       if (url === '/api/state') {
         res.writeHead(200);

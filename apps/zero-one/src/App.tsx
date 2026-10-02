@@ -20,20 +20,34 @@ import { JoinOnboardingPage } from './pages/JoinOnboardingPage';
 import { PitchPage } from './pages/PitchPage';
 import { CodeScrietAuthGate } from './components/CodeScrietAuthGate';
 
+const parseRouteFromHash = (hashStr: string): string => {
+  const clean = hashStr.replace(/^#/, '').trim();
+  if (!clean) return 'landing';
+  if (clean.includes('=')) {
+    const parts = clean.split('&');
+    for (const part of parts) {
+      const [k] = part.split('=');
+      if (k && k !== 'token' && k !== 'api') {
+        return k;
+      }
+    }
+    return 'onboarding';
+  }
+  return clean;
+};
+
 const SimulationApp: React.FC = () => {
   const { isAdminVerified } = useSimulation();
   // Navigation State with URL Hash and Query Sync
   const [currentView, setCurrentView] = useState<string>(() => {
-    const hash = window.location.hash.replace('#', '');
-    if (hash) return hash;
-    return 'landing';
+    return parseRouteFromHash(window.location.hash);
   });
 
   // Handle URL hash changes
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (hash) setCurrentView(hash);
+      const route = parseRouteFromHash(window.location.hash);
+      if (route) setCurrentView(route);
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);

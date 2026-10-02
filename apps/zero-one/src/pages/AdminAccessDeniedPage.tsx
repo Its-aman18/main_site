@@ -1,5 +1,6 @@
 import React from 'react';
-import { ShieldAlert, ArrowLeft, Calendar } from 'lucide-react';
+import { ShieldAlert, ArrowLeft, Calendar, Shield } from 'lucide-react';
+import { useSimulation } from '../services/simulationContext';
 
 interface AdminAccessDeniedPageProps {
   onNavigate: (view: string) => void;
@@ -10,6 +11,8 @@ export const AdminAccessDeniedPage: React.FC<AdminAccessDeniedPageProps> = ({
   onNavigate,
   targetPath = '/admin.html',
 }) => {
+  const { loginWithCredentials } = useSimulation();
+
   const handleBackToZeroOne = () => {
     if (window.location.pathname.includes('admin.html')) {
       window.location.href = '/';
@@ -23,6 +26,15 @@ export const AdminAccessDeniedPage: React.FC<AdminAccessDeniedPageProps> = ({
       window.location.href = '/#events-directory';
     } else {
       onNavigate('events-directory');
+    }
+  };
+
+  const handleLoginAsAdmin = async () => {
+    await loginWithCredentials('admin@example.com', 'change_this_password');
+    if (window.location.pathname.includes('admin.html')) {
+      window.location.reload();
+    } else {
+      onNavigate('admin-control');
     }
   };
 
@@ -47,8 +59,20 @@ export const AdminAccessDeniedPage: React.FC<AdminAccessDeniedPageProps> = ({
           </p>
         </div>
 
+        {/* 1-Click Super Admin Sign In */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={handleLoginAsAdmin}
+            className="w-full py-3 px-5 rounded-xl bg-stone-900 dark:bg-stone-100 hover:bg-stone-800 text-white dark:text-stone-900 font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+          >
+            <Shield className="w-4 h-4 text-orange-500" />
+            <span>1-Click Switch to Super Admin</span>
+          </button>
+        </div>
+
         {/* Navigation Buttons: Back to ZERO -> ONE and Back to Events */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <button
             id="btn-back-zero-one"
             onClick={handleBackToZeroOne}

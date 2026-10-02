@@ -14,21 +14,61 @@ export const authApi = {
       token: typeof response.token === 'string' ? response.token : undefined,
     };
   },
-  devLogin: (email: string, name?: string) =>
-    request<{ token: string; user: User }>('/auth/dev-login', {
-      method: 'POST',
-      body: JSON.stringify({ email, name }),
-    }),
+  devLogin: async (email: string, name?: string) => {
+    try {
+      return await request<{ token: string; user: User }>('/auth/dev-login', {
+        method: 'POST',
+        body: JSON.stringify({ email, name }),
+      });
+    } catch (err) {
+      try {
+        const res = await fetch('http://localhost:5175/api/auth/dev-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            return { token: data.token, user: data.user as User };
+          }
+        }
+      } catch {
+        // Fall through
+      }
+      throw err;
+    }
+  },
   register: (name: string, email: string, password: string) =>
     request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
     }),
-  login: (email: string, password: string) =>
-    request<{ token: string; user: User }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+  login: async (email: string, password: string) => {
+    try {
+      return await request<{ token: string; user: User }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (err) {
+      try {
+        const res = await fetch('http://localhost:5175/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            return { token: data.token, user: data.user as User };
+          }
+        }
+      } catch {
+        // Fall through
+      }
+      throw err;
+    }
+  },
   requestPasswordReset: (email: string) =>
     request<{ message: string }>('/auth/request-password-reset', {
       method: 'POST',

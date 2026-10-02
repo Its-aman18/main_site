@@ -20,7 +20,7 @@ export const CodeScrietAuthGate: React.FC<CodeScrietAuthGateProps> = ({
   targetPath = '/admin.html',
   onNavigate = () => {},
 }) => {
-  const { authState, isLoggedIn, isAdminVerified, logout } = useSimulation();
+  const { authState, isLoggedIn, isAdminVerified, logout, loginWithCredentials } = useSimulation();
 
   // If view is public and does not require authentication
   if (!requireAuth && !requireAdmin) {
@@ -46,7 +46,6 @@ export const CodeScrietAuthGate: React.FC<CodeScrietAuthGateProps> = ({
 
   // Expired session state
   if (authState === 'SESSION_EXPIRED') {
-    const returnUrl = typeof window !== 'undefined' ? window.location.href : '/';
     return (
       <div className="min-h-[75vh] flex items-center justify-center p-4 sm:p-6 lg:p-8">
         <div className="max-w-md w-full card p-8 text-center space-y-6 shadow-2xl border-amber-500/30 bg-white dark:bg-[#12141C]">
@@ -58,20 +57,26 @@ export const CodeScrietAuthGate: React.FC<CodeScrietAuthGateProps> = ({
               Session Expired
             </span>
             <h1 className="text-2xl font-black font-heading text-stone-900 dark:text-stone-100">
-              Your Code.SCRIET session has expired
+              Re-authenticate Demo Session
             </h1>
             <p className="text-xs text-stone-600 dark:text-stone-400">
-              Please re-authenticate with your Code.SCRIET credentials to continue your simulation session.
+              Your session has ended. Select an account to jump right back in:
             </p>
           </div>
-          <a
-            href={getLoginUrl(returnUrl)}
-            onClick={() => logout()}
-            className="w-full btn-primary text-xs py-3 px-6 flex items-center justify-center gap-2"
-          >
-            <LogIn className="w-4 h-4" />
-            <span>Continue with Code.SCRIET</span>
-          </a>
+          <div className="space-y-2">
+            <button
+              onClick={() => loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026')}
+              className="w-full btn-primary text-xs py-3 px-6 flex items-center justify-center gap-2"
+            >
+              <span>🚀 Resume as Team Leader (Arjun)</span>
+            </button>
+            <button
+              onClick={() => loginWithCredentials('admin@example.com', 'change_this_password')}
+              className="w-full py-2.5 px-6 rounded-xl border border-stone-300 dark:border-stone-700 text-xs font-bold text-stone-800 dark:text-stone-200"
+            >
+              <span>🛡️ Resume as Super Admin</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -79,7 +84,6 @@ export const CodeScrietAuthGate: React.FC<CodeScrietAuthGateProps> = ({
 
   // Unauthenticated state
   if (!isLoggedIn || authState === 'NOT_AUTHENTICATED' || authState === 'INVALID_SESSION') {
-    const returnUrl = typeof window !== 'undefined' ? window.location.href : '/';
     return (
       <div className="min-h-[75vh] flex items-center justify-center p-4 sm:p-6 lg:p-8">
         <div className="max-w-md w-full card p-8 sm:p-10 text-center space-y-6 shadow-2xl border-orange-500/20 bg-white dark:bg-[#12141C]">
@@ -88,26 +92,37 @@ export const CodeScrietAuthGate: React.FC<CodeScrietAuthGateProps> = ({
           </div>
           <div className="space-y-2">
             <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-              Authentication Required
+              Instant Demo Access
             </span>
             <h1 className="text-2xl sm:text-3xl font-black font-heading text-stone-900 dark:text-stone-100">
-              Code.SCRIET Account Required
+              Sign In to ZERO → ONE
             </h1>
             <p className="text-xs text-stone-600 dark:text-stone-400 leading-relaxed">
-              ZERO → ONE uses centralized authentication via <strong className="text-stone-800 dark:text-stone-200">codescriet.dev</strong>. Sign in once to access squad tools, live trading, and event synchronization.
+              Select your persona below to immediately access squad tools, the live digital market, crisis events, and control center:
             </p>
           </div>
 
-          <a
-            href={getLoginUrl(returnUrl)}
-            className="w-full btn-primary text-xs py-3.5 px-6 flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25"
-          >
-            <LogIn className="w-4 h-4" />
-            <span>Continue with Code.SCRIET</span>
-          </a>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => loginWithCredentials('arjun@scriet.edu', 'ZeroOne#2026')}
+              className="w-full btn-primary text-xs py-3.5 px-6 flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25"
+            >
+              <span>🚀 Enter as Team Leader (Arjun / TechNova)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => loginWithCredentials('admin@example.com', 'change_this_password')}
+              className="w-full py-3 px-6 rounded-xl border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-xs font-bold text-stone-800 dark:text-stone-200 flex items-center justify-center gap-2 transition-colors"
+            >
+              <Shield className="w-4 h-4 text-orange-500" />
+              <span>🛡️ Enter as Super Admin (admin@example.com)</span>
+            </button>
+          </div>
 
           <p className="text-[11px] text-stone-400">
-            No separate account or password required.
+            Pre-configured with ₹10,00,000 capital and live startup arena.
           </p>
         </div>
       </div>
