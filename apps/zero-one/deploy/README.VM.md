@@ -69,6 +69,19 @@ Flow: user registers on `/events/zero-one*` → entry button appears →
 handoff with `#token` → zero-one validates against the main API and signs
 them in → onboarding binds squad + role + device to their email.
 
+The local main-site super admin (`SUPER_ADMIN_EMAIL` in root `.env`,
+`admin@example.com` in dev) is seeded as a zero-one SUPER_ADMIN, so it opens
+`/admin.html` right after handoff. Extra staff: `ADMIN_EMAILS` (comma-separated,
+auto-verified ADMIN; aliases `EXTRA_ADMIN_EMAILS`, `VITE_ADMIN_EMAILS`).
+
+## 2c. Full fake event rehearsal (one command)
+
+`npm run demo:zero-one` drives the backend through the whole lifecycle
+SETUP → … → REVEAL as the super-admin: multi-team device check-ins, clock
+sets, market edits, a crisis sent to AgriNext, auction with bids, lockdown
+freeze check, judge scorecards, and the final leaderboard. Needs the zero-one
+backend on :5003 (and the main API on :5001 for the registration leg).
+
 ## 3. Updates
 
 ```bash

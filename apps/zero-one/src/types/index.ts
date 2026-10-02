@@ -441,6 +441,11 @@ export type CommandType =
   | 'REVEAL_RESULTS'
   | 'UPDATE_MARKET_PRICE'
   | 'ADJUST_STOCK'
+  | 'UPDATE_TEAM'
+  | 'UPDATE_EVENT_CONFIG'
+  | 'UPDATE_LIVE_SCREEN'
+  | 'CREATE_CRISIS_CARD'
+  | 'UPDATE_JUDGING_CRITERIA'
   | 'ADD_MARKET_ITEM'
   | 'CREATE_MARKET_ITEM'
   | 'RECORD_LEDGER_TRANSACTION'
@@ -522,5 +527,70 @@ export interface AuthoritativeServerStateSummary {
   isLockdownActive: boolean;
   latestSequence: number;
 }
+
+export interface RoleAssignmentInfo {
+  assigned: boolean;
+  assignedToName?: string;
+  assignedToEmail?: string;
+  assignedToUserId?: string;
+  isCurrent: boolean;
+}
+
+export interface RoleAvailabilityMap {
+  CEO: RoleAssignmentInfo;
+  CFO: RoleAssignmentInfo;
+  CTO: RoleAssignmentInfo;
+  CMO: RoleAssignmentInfo;
+}
+
+export interface ZeroOneContext {
+  authenticated: boolean;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    avatarUrl?: string;
+  } | null;
+  event: {
+    id: string;
+    title: string;
+    slug: string;
+  } | null;
+  registration: {
+    registered: boolean;
+    status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'NOT_REGISTERED' | 'TEAM_NOT_FOUND' | 'NOT_AUTHENTICATED';
+    registeredAt?: string;
+  };
+  team: {
+    id: string;
+    name: string;
+    code: string;
+    leaderId: string;
+    isLeader: boolean;
+    members: Array<{
+      id: string;
+      userId: string;
+      name: string;
+      email: string;
+      role: 'LEADER' | 'MEMBER';
+      simulationRole?: SimulationRole | null;
+      joinedAt?: string;
+      avatarUrl?: string;
+    }>;
+  } | null;
+  simulation: {
+    initialized: boolean;
+    startingCapital: number;
+    currentBalance: number;
+  } | null;
+  participant: {
+    role: SimulationRole | null;
+    deviceBound: boolean;
+    deviceId: string | null;
+  } | null;
+  roles: RoleAvailabilityMap;
+}
+
 
 

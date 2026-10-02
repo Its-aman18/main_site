@@ -1,41 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSimulation } from '../services/simulationContext';
-import { Trophy, Clock, Flame, TrendingUp, Sparkles, AlertCircle } from 'lucide-react';
+import { Trophy, TrendingUp } from 'lucide-react';
 
 interface LiveScreenPageProps {
   onNavigate: (view: string) => void;
 }
 
 export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) => {
+  void onNavigate;
   const {
     teams,
     eventStatus,
     serverTimeRemainingSeconds,
     marketItems,
     announcements,
+    activeCrisis,
+    liveScreenConfig,
+    getBalance,
+    floorScores,
+    isLockdownActive,
   } = useSimulation();
 
   const [activeTab, setActiveTab] = useState<'LEADERBOARD' | 'CRISIS_GRID'>('LEADERBOARD');
+  const [now, setNow] = useState(() => Date.now());
+
+  // Tick for the crisis countdown readout.
+  useEffect(() => {
+    if (!activeCrisis || activeCrisis.status !== 'ACTIVE') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activeCrisis?.id, activeCrisis?.status]);
 
   const formatTimer = (totalSecs: number) => {
-    const m = Math.floor(totalSecs / 60);
-    const s = totalSecs % 60;
+    const clamped = Math.max(0, Math.floor(totalSecs));
+    const m = Math.floor(clamped / 60);
+    const s = clamped % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Seeded mock scores matching Screenshot 6 exactly:
-  const leaderboardData = [
-    { rank: 1, name: 'InnovateX', code: 'Team 07', capital: 920000, health: 82, score: 420 },
-    { rank: 2, name: 'TechNova', code: 'Team 01', capital: 840000, health: 76, score: 388 },
-    { rank: 3, name: 'AgriNext', code: 'Team 02', capital: 780000, health: 71, score: 365 },
-    { rank: 4, name: 'CodeCatalyst', code: 'Team 03', capital: 690000, health: 68, score: 330 },
-    { rank: 5, name: 'Visionary', code: 'Team 04', capital: 610000, health: 64, score: 310 },
-    { rank: 6, name: 'NexGen', code: 'Team 05', capital: 580000, health: 61, score: 298 },
-    { rank: 7, name: 'StartSphere', code: 'Team 06', capital: 510000, health: 58, score: 276 },
-    { rank: 8, name: 'FutureFounders', code: 'Team 08', capital: 490000, health: 54, score: 260 },
-    { rank: 9, name: 'Ideatech', code: 'Team 09', capital: 420000, health: 51, score: 240 },
-    { rank: 10, name: 'BuildLoop', code: 'Team 10', capital: 380000, health: 48, score: 220 },
-  ];
+  // Live leaderboard: real balances, real health, server floor scores.
+  const rows = [...teams]
+    .map((t) => {
+      const floor = floorScores.find((f) => f.teamId === t.id);
+      return {
+        id: t.id,
+        name: t.name,
+        code: t.teamCode,
+        capital: getBalance(t.id),
+        health: t.healthScore,
+        floor: floor ? floor.total : null,
+      };
+    })
+    .sort((a, b) => b.capital - a.capital)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+
+  const crisisRemainingSecs = activeCrisis && activeCrisis.status === 'ACTIVE'
+    ? Math.max(0, Math.floor((new Date(activeCrisis.expiresAt).getTime() - now) / 1000))
+    : null;
+
+  const tickerText =
+    liveScreenConfig.announcementTickerText ||
+    announcements[0]?.title ||
+    'ZERO → ONE live';
+
+  const modeBanner =
+    liveScreenConfig.presentationMode === 'REVEAL' || eventStatus === 'REVEAL'
+      ? 'WINNERS REVEAL'
+      : liveScreenConfig.presentationMode === 'LOCKDOWN' || isLockdownActive
+        ? 'LOCKDOWN — BOOKS CLOSED'
+        : liveScreenConfig.presentationMode === 'QUALIFIERS'
+          ? 'QUALIFIERS'
+          : null;
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 p-4 sm:p-8 transition-colors">
@@ -55,6 +90,11 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
             <p className="text-xs text-stone-500 mt-1">
               Official Auditorium Screen • {eventStatus.replace('_', ' ')}
             </p>
+            {modeBanner && (
+              <p className="mt-2 inline-block px-3 py-1 rounded-full text-xs font-black tracking-wider bg-orange-500 text-white">
+                {modeBanner}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -93,7 +133,7 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
         </div>
 
         {activeTab === 'LEADERBOARD' ? (
-          /* Table matching Screenshot 6 */
+          liveScreenConfig.showLeaderboard ? (
           <div className="card overflow-hidden border border-stone-200 dark:border-stone-800 shadow-xl">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm border-collapse">
@@ -103,16 +143,15 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
                     <th className="py-3.5 px-6">Team</th>
                     <th className="py-3.5 px-6">Capital</th>
                     <th className="py-3.5 px-6">Health</th>
-                    <th className="py-3.5 px-6 text-right">Score</th>
+                    <th className="py-3.5 px-6 text-right">Floor</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 dark:divide-stone-800/80">
-                  {leaderboardData.map((t) => (
+                  {rows.map((t) => (
                     <tr
-                      key={t.rank}
+                      key={t.id}
                       className="hover:bg-orange-50/40 dark:hover:bg-stone-900/40 transition-colors"
                     >
-                      {/* Rank badge */}
                       <td className="py-3.5 px-4 text-center">
                         {t.rank === 1 ? (
                           <span className="w-6 h-6 rounded-full bg-amber-400 text-amber-950 font-black text-xs inline-flex items-center justify-center shadow-md">
@@ -133,7 +172,6 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
                         )}
                       </td>
 
-                      {/* Team Name */}
                       <td className="py-3.5 px-6 font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
                         <span>{t.name}</span>
                         {t.rank === 1 && (
@@ -141,12 +179,10 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
                         )}
                       </td>
 
-                      {/* Capital */}
                       <td className="py-3.5 px-6 font-mono font-bold text-stone-800 dark:text-stone-200">
                         ₹ {t.capital.toLocaleString('en-IN')}
                       </td>
 
-                      {/* Health */}
                       <td className="py-3.5 px-6 font-mono font-bold">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs ${
@@ -159,9 +195,8 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
                         </span>
                       </td>
 
-                      {/* Composite Score */}
                       <td className="py-3.5 px-6 text-right font-mono font-black text-base text-orange-600 dark:text-orange-500">
-                        {t.score}
+                        {t.floor === null ? '—' : `${t.floor} / 33`}
                       </td>
                     </tr>
                   ))}
@@ -169,54 +204,77 @@ export const LiveScreenPage: React.FC<LiveScreenPageProps> = ({ onNavigate }) =>
               </table>
             </div>
           </div>
-        ) : (
-          /* Live Crisis Grid matching Rule 49 */
+          ) : (
+            <div className="card p-10 text-center text-sm text-stone-500">
+              Leaderboard hidden by stage control.
+            </div>
+          )
+        ) : liveScreenConfig.showCrisisGrid ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                { code: 'TEAM 01', status: '04:52', color: 'text-red-500' },
-                { code: 'TEAM 02', status: '04:49', color: 'text-red-500' },
-                { code: 'TEAM 03', status: 'RESPONDED', color: 'text-emerald-500' },
-                { code: 'TEAM 04', status: '03:11', color: 'text-red-500' },
-                { code: 'TEAM 05', status: 'RESPONDED', color: 'text-emerald-500' },
-                { code: 'TEAM 06', status: '04:15', color: 'text-red-500' },
-                { code: 'TEAM 07', status: 'RESPONDED', color: 'text-emerald-500' },
-                { code: 'TEAM 08', status: '02:40', color: 'text-red-500' },
-              ].map((gridItem, idx) => (
-                <div
-                  key={idx}
-                  className="card p-5 text-center space-y-1.5 border-2 border-stone-200 dark:border-stone-800"
-                >
-                  <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-                    {gridItem.code}
+              {teams.map((t) => {
+                const isTarget = activeCrisis?.teamId === t.id;
+                const targeted = isTarget && activeCrisis?.status === 'ACTIVE';
+                const label = targeted && crisisRemainingSecs !== null
+                  ? formatTimer(crisisRemainingSecs)
+                  : isTarget
+                    ? (activeCrisis?.status || '—')
+                    : 'STANDBY';
+                const color = targeted
+                  ? 'text-red-500'
+                  : isTarget
+                    ? 'text-emerald-500'
+                    : 'text-stone-400';
+                return (
+                  <div
+                    key={t.id}
+                    className="card p-5 text-center space-y-1.5 border-2 border-stone-200 dark:border-stone-800"
+                  >
+                    <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                      {t.teamCode} • {t.name}
+                    </div>
+                    <div className={`text-xl font-black font-mono ${color}`}>
+                      {label}
+                    </div>
+                    {targeted && (
+                      <div className="text-[11px] text-stone-500 truncate">
+                        {activeCrisis?.crisis?.title || 'Crisis active'}
+                      </div>
+                    )}
                   </div>
-                  <div className={`text-xl font-black font-mono ${gridItem.color}`}>
-                    {gridItem.status}
-                  </div>
-                </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="card p-10 text-center text-sm text-stone-500">
+            Crisis grid hidden by stage control.
+          </div>
+        )}
+
+        {liveScreenConfig.showMarketTicker && (
+          <div className="p-3.5 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 overflow-hidden flex items-center gap-4 text-xs font-semibold">
+            <span className="font-bold text-orange-600 flex items-center gap-1 flex-shrink-0">
+              <TrendingUp className="w-4 h-4" />
+              MARKET TICKER:
+            </span>
+            <div className="flex items-center gap-6 overflow-x-auto whitespace-nowrap text-stone-600 dark:text-stone-300">
+              {marketItems.map((item) => (
+                <span key={item.sku} className="font-mono">
+                  {item.name}: ₹{item.currentPrice.toLocaleString('en-IN')}{' '}
+                  {item.priceChangePct !== 0 && (
+                    <span className={item.priceChangePct > 0 ? 'text-red-500' : 'text-emerald-500'}>
+                      ({item.priceChangePct > 0 ? '+' : ''}{item.priceChangePct}%)
+                    </span>
+                  )}
+                </span>
               ))}
             </div>
           </div>
         )}
 
-        {/* Live Market Ticker marquee */}
-        <div className="p-3.5 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 overflow-hidden flex items-center gap-4 text-xs font-semibold">
-          <span className="font-bold text-orange-600 flex items-center gap-1 flex-shrink-0">
-            <TrendingUp className="w-4 h-4" />
-            MARKET TICKER:
-          </span>
-          <div className="flex items-center gap-6 overflow-x-auto whitespace-nowrap text-stone-600 dark:text-stone-300">
-            {marketItems.map((item) => (
-              <span key={item.sku} className="font-mono">
-                {item.name}: ₹{item.currentPrice.toLocaleString('en-IN')}{' '}
-                {item.priceChangePct !== 0 && (
-                  <span className={item.priceChangePct > 0 ? 'text-red-500' : 'text-emerald-500'}>
-                    ({item.priceChangePct > 0 ? '+' : ''}{item.priceChangePct}%)
-                  </span>
-                )}
-              </span>
-            ))}
-          </div>
+        <div className="p-3 rounded-2xl bg-orange-500/10 border border-orange-500/25 text-xs font-bold text-orange-700 dark:text-orange-400 text-center">
+          {tickerText}
         </div>
       </div>
     </div>

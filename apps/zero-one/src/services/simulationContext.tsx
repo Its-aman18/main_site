@@ -26,6 +26,7 @@ import {
   AdminAuditLogEntry,
   AdminAuthorizationStatus,
   AdminPermissionRole,
+  ZeroOneContext,
 } from '../types';
 import {
   DEFAULT_CONFIG,
@@ -76,6 +77,12 @@ interface SimulationContextType {
   isLoggedIn: boolean;
   logout: () => void;
 
+  // Authoritative ZERO → ONE Registration & Team Context
+  zeroOneContext: ZeroOneContext | null;
+  fetchZeroOneContext: () => Promise<ZeroOneContext | null>;
+  claimSimulationRole: (role: SimulationRole) => Promise<{ success: boolean; message?: string; error?: string; code?: string }>;
+  bindSimulationDevice: (deviceId: string, deviceName?: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+
   // Event & Clock
   eventStatus: EventStatus;
   setEventStatus: (status: EventStatus) => void;
@@ -87,6 +94,7 @@ interface SimulationContextType {
   resetClock: (minutes?: number) => void;
   isLockdownActive: boolean;
   triggerLockdown: () => void;
+  revealResults: () => void;
 
   // Teams & Active Team
   teams: Team[];
@@ -127,6 +135,7 @@ interface SimulationContextType {
 
   // Canvas & Artifacts
   canvas: StartupCanvas;
+  canvasStore: Record<string, StartupCanvas>;
   updateCanvasField: (field: keyof Omit<StartupCanvas, 'teamId' | 'lastSavedAt' | 'lastSavedBy' | 'version'>, value: string) => void;
   artifacts: ArtifactSubmission[];
   submitArtifact: (submission: Omit<ArtifactSubmission, 'id' | 'submittedAt'>) => void;
@@ -274,6 +283,9 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   });
 
+  // Authoritative ZERO → ONE Registration & Team Context State
+  const [zeroOneContext, setZeroOneContext] = useState<ZeroOneContext | null>(null);
+
   // Authoritative Server-Side Admin Authorization & Audit Logs (Controlled Exclusively by Super Admin)
   const [adminAuthorizations, setAdminAuthorizations] = useState<AdminAuthorization[]>(() => {
     const saved = localStorage.getItem(STORAGE_PREFIX + 'admin_authorizations');
@@ -316,10 +328,26 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLockdownActive, setIsLockdownActive] = useState<boolean>(false);
 
   // 3. Teams State
+  // Non-empty invariant: every consumer (header, dashboards, engine math)
+  // assumes at least one team. Corrupt/empty storage or payloads fall back
+  // to the seeded squads instead of crashing the app.
+  const sanitizeTeams = (value: unknown): Team[] => {
+    if (!Array.isArray(value) || value.length === 0) return INITIAL_TEAMS;
+    return value as Team[];
+  };
+
   const [teams, setTeams] = useState<Team[]>(() => {
-    const saved = localStorage.getItem(STORAGE_PREFIX + 'teams');
-    return saved ? JSON.parse(saved) : INITIAL_TEAMS;
+    try {
+      const saved = localStorage.getItem(STORAGE_PREFIX + 'teams');
+      if (!saved) return INITIAL_TEAMS;
+      return sanitizeTeams(JSON.parse(saved));
+    } catch {
+      return INITIAL_TEAMS;
+    }
   });
+  const setTeamsGuarded = useCallback((value: unknown) => {
+    setTeams(sanitizeTeams(value));
+  }, []);
   const [currentTeamId, setCurrentTeamId] = useState<string>('team-07');
 
   // 4. Financial Ledger (Append-Only)
@@ -492,6 +520,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   });
 
+  // Per-squad canvas replicas (from /api/state canvasStore + CANVAS_UPDATED
+  // events). Powers the admin CANVAS tab squad switcher.
+  const [canvasStore, setCanvasStore] = useState<Record<string, StartupCanvas>>({});
+
   // 8. Artifacts & Submissions
   const [artifacts, setArtifacts] = useState<ArtifactSubmission[]>([
     {
@@ -620,7 +652,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setServerTimeRemainingSeconds(cached.serverClock.timeRemainingSeconds);
           setIsClockRunning(cached.serverClock.isClockRunning);
         }
-        if (cached.teams) setTeams(cached.teams);
+        if (cached.teams) setTeamsGuarded(cached.teams);
         if (cached.ledger) setLedger(cached.ledger);
         if (cached.marketItems) setMarketItems(cached.marketItems);
         if (cached.inventory) setInventory(cached.inventory);
@@ -649,7 +681,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setServerTimeRemainingSeconds(data.serverClock.timeRemainingSeconds);
             setIsClockRunning(data.serverClock.isClockRunning);
           }
-          if (data.teams) setTeams(data.teams);
+          if (data.teams) setTeamsGuarded(data.teams);
           if (data.ledger) setLedger(data.ledger);
           if (data.marketItems) setMarketItems(data.marketItems);
           if (data.inventory) setInventory(data.inventory);
@@ -659,15 +691,17 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (data.activeAuction !== undefined) setActiveAuction(data.activeAuction);
           if (data.auctionBids) setAuctionBids(data.auctionBids);
           if (data.canvas) setCanvas(data.canvas);
+          if (data.canvasStore) setCanvasStore(data.canvasStore);
           if (data.artifacts) setArtifacts(data.artifacts);
           if (data.adminAuthorizations) setAdminAuthorizations(data.adminAuthorizations);
           if (data.adminAuditLogs) setAdminAuditLogs(data.adminAuditLogs);
           if (data.announcements) setAnnouncements(data.announcements);
+          if (data.liveScreenConfig) setLiveScreenConfig((prev) => ({ ...prev, ...data.liveScreenConfig }));
           if (data.isLockdownActive !== undefined) setIsLockdownActive(data.isLockdownActive);
         }
       })
       .catch((err) => console.warn('Could not sync initial state from backend:', err));
-  }, []);
+  }, [setTeamsGuarded]);
 
   // Real-Time Bus Subscription for Cross-Tab / Cross-Window & SSE Server Sync
   useEffect(() => {
@@ -710,6 +744,23 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   : item
               )
             );
+          }
+          break;
+        case 'EVENT_CONFIG_UPDATED':
+          if (p.config) {
+            setEventConfig((prev) => ({ ...prev, ...p.config }));
+          }
+          break;
+        case 'CRISIS_CARD_ADDED':
+          if (p.card) {
+            setCrisisCards((prev) =>
+              prev.some((c) => c.id === p.card.id) ? prev : [...prev, p.card]
+            );
+          }
+          break;
+        case 'JUDGING_CRITERIA_UPDATED':
+          if (p.criteria) {
+            setJudgingCriteria(p.criteria);
           }
           break;
         case 'PURCHASE_PROPOSED':
@@ -764,12 +815,34 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           break;
         case 'CRISIS_DISPATCHED':
           if (p.crisis) setActiveCrisis(p.crisis);
+          else if (p.assignment) setActiveCrisis(p.assignment);
           break;
         case 'CRISIS_RESPONSE_RECEIVED':
           if (p.activeCrisis) setActiveCrisis(p.activeCrisis);
           break;
         case 'CRISIS_TIMEOUT':
           if (p.crisis) setActiveCrisis({ ...p.crisis, status: 'TIMEOUT' });
+          break;
+        case 'CRISIS_RESOLVED':
+          // Manual admin resolution (or any resolver): clear the banner on
+          // every screen watching that team's crisis.
+          setActiveCrisis((prev) =>
+            prev && (!p.teamId || prev.teamId === p.teamId) ? null : prev
+          );
+          break;
+        case 'MARKET_ITEM_ADDED':
+          if (p.item) {
+            setMarketItems((prev) =>
+              prev.some((i) => i.sku === p.item.sku)
+                ? prev.map((i) => (i.sku === p.item.sku ? p.item : i))
+                : [...prev, p.item]
+            );
+          }
+          break;
+        case 'TEAM_UPDATED':
+          if (p.team) {
+            setTeams((prev) => prev.map((t) => (t.id === p.team.id ? { ...t, ...p.team } : t)));
+          }
           break;
         case 'AUCTION_OPENED':
           if (p.auction) {
@@ -798,7 +871,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
           break;
         case 'CANVAS_UPDATED':
-          if (p.canvas) setCanvas(p.canvas);
+          if (p.canvas) {
+            setCanvas(p.canvas);
+            const teamId = p.canvas.teamId;
+            if (teamId) {
+              setCanvasStore((prev) => ({ ...prev, [teamId]: p.canvas }));
+            }
+          }
           break;
         case 'ARTIFACT_SUBMITTED':
           if (p.artifact) {
@@ -824,6 +903,11 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setAnnouncements((prev) => [p.announcement, ...prev.filter((a) => a.id !== p.announcement.id)]);
           }
           break;
+        case 'LIVE_SCREEN_CONFIG_UPDATED':
+          if (p.config) {
+            setLiveScreenConfig((prev) => ({ ...prev, ...p.config }));
+          }
+          break;
         case 'SCORE_SUBMITTED':
           if (p.score) {
             setJudgeScores((prev) => [p.score, ...prev.filter((s) => s.id !== p.score.id)]);
@@ -835,7 +919,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           zoFetch('/api/state')
             .then((r) => r.json())
             .then((st) => {
-              if (st && st.teams) setTeams(st.teams);
+              if (st && st.teams) setTeamsGuarded(st.teams);
             })
             .catch(() => {});
           break;
@@ -855,13 +939,14 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             .then((r) => r.json())
             .then((st) => {
               if (st) {
-                setTeams(st.teams || INITIAL_TEAMS);
+                setTeams(sanitizeTeams(st.teams));
                 setMarketItems(st.marketItems || INITIAL_MARKET_ITEMS);
                 setPurchaseProposals(st.purchaseProposals || []);
                 setLedger(st.ledger || []);
                 setActiveCrisis(st.activeCrisis || null);
                 setActiveAuction(st.activeAuction || null);
                 setCanvas(st.canvas);
+                if (st.canvasStore) setCanvasStore(st.canvasStore);
                 setArtifacts(st.artifacts || []);
                 setJudgeScores(st.judgeScores || []);
                 setAnnouncements(st.announcements || []);
@@ -879,7 +964,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
 
     return unsub;
-  }, []);
+  }, [setTeamsGuarded]);
 
   // Sync to local storage
   useEffect(() => {
@@ -898,9 +983,9 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     localStorage.setItem(STORAGE_PREFIX + 'status', eventStatus);
   }, [eventStatus]);
 
-  // Active Team calculation
+  // Active Team calculation (never undefined — teams list is guarded non-empty).
   const currentTeam = useMemo(() => {
-    return teams.find((t) => t.id === currentTeamId) || teams[0];
+    return teams.find((t) => t.id === currentTeamId) || teams[0] || INITIAL_TEAMS[0];
   }, [teams, currentTeamId]);
 
   // Server clock timer interval
@@ -992,22 +1077,40 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       realtimeBus.emit('CLOCK_SYNC', { seconds: serverTimeRemainingSeconds, isRunning: next }, currentUser.name);
       return next;
     });
-  }, [serverTimeRemainingSeconds, currentUser.name]);
+    // Server-authoritative: every screen follows the same clock.
+    commandSync.dispatch('TOGGLE_CLOCK', {}, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [serverTimeRemainingSeconds, currentUser.id, currentUser.email, currentUser.name]);
 
   const resetClock = useCallback(
     (minutes = 25) => {
       const secs = minutes * 60;
       setServerTimeRemainingSeconds(secs);
       realtimeBus.emit('CLOCK_SYNC', { seconds: secs, isRunning: isClockRunning }, currentUser.name);
+      // Server-authoritative time set (event duration control).
+      commandSync.dispatch('RESET_CLOCK', { minutes }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
       logAuditAction('CLOCK_RESET', 'CLOCK', `Reset clock to ${minutes} minutes`, 'ADMIN');
     },
-    [isClockRunning, currentUser.name, logAuditAction]
+    [isClockRunning, currentUser.id, currentUser.email, currentUser.name, logAuditAction]
   );
 
-  // Team Update
+  // Team Update (server-authoritative via UPDATE_TEAM; health/status edits in
+  // Teams & Roles reach every device, not just this browser).
   const updateTeam = useCallback((teamId: string, updates: Partial<Team>) => {
     setTeams((prev) => prev.map((t) => (t.id === teamId ? { ...t, ...updates } : t)));
-  }, []);
+    commandSync.dispatch('UPDATE_TEAM', { teamId, updates }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
 
   // Manual Administrative Financial Adjustments (Rule 7 & Rule 83)
   const manualLedgerAdjustment = useCallback(
@@ -1343,22 +1446,47 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Market management (Admin)
   const addMarketItem = useCallback((item: MarketItem) => {
     setMarketItems((prev) => [...prev, item]);
-  }, []);
+    commandSync.dispatch('CREATE_MARKET_ITEM', { ...item }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
 
   const updateMarketItem = useCallback((sku: string, updates: Partial<MarketItem>) => {
     setMarketItems((prev) => prev.map((i) => (i.sku === sku ? { ...i, ...updates } : i)));
-  }, []);
+    // A price edit must move the authoritative market, not just this screen.
+    if (updates.currentPrice !== undefined) {
+      commandSync.dispatch('UPDATE_MARKET_PRICE', { sku, price: updates.currentPrice }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
+    }
+  }, [currentUser.id, currentUser.email]);
 
   const adjustStock = useCallback((sku: string, delta: number) => {
     setMarketItems((prev) =>
       prev.map((i) => (i.sku === sku ? { ...i, stockRemaining: Math.max(0, i.stockRemaining + delta) } : i))
     );
-  }, []);
+    commandSync.dispatch('ADJUST_STOCK', { sku, delta }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
 
-  // Crisis operations
+  // Crisis card authoring (server-authoritative so every admin and every
+  // DISPATCH_CRISIS resolves the same card — previously local-only, which made
+  // the server fall back to a random card for other sessions).
   const addCrisisCard = useCallback((card: CrisisCard) => {
     setCrisisCards((prev) => [...prev, card]);
-  }, []);
+    commandSync.dispatch('CREATE_CRISIS_CARD', { card }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
 
   const updateCrisisCard = useCallback((id: string, updates: Partial<CrisisCard>) => {
     setCrisisCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
@@ -1377,10 +1505,17 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         status: 'ACTIVE',
       };
       setActiveCrisis(newAssignment);
+      // Server-authoritative dispatch: the target team's devices receive it
+      // via the CRISIS_DISPATCHED broadcast.
+      commandSync.dispatch('DISPATCH_CRISIS', { teamId, crisisId: card.id }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
       realtimeBus.emit('CRISIS_DISPATCHED', { assignment: newAssignment }, currentUser.name);
       logAuditAction('CRISIS_DISPATCHED', teamId, `Dispatched ${card.title} to ${teamId}`, 'ADMIN');
     },
-    [crisisCards, currentUser.name, logAuditAction]
+    [crisisCards, currentUser.id, currentUser.email, currentUser.name, logAuditAction]
   );
 
   const extendCrisisTimer = useCallback(
@@ -1389,18 +1524,28 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const currentExpiry = new Date(activeCrisis.expiresAt).getTime();
       const updatedExpiry = new Date(currentExpiry + secondsToAdd * 1000).toISOString();
       setActiveCrisis((prev) => (prev ? { ...prev, expiresAt: updatedExpiry } : null));
+      commandSync.dispatch('EXTEND_CRISIS_TIMER', { teamId: activeCrisis.teamId, additionalSeconds: secondsToAdd }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
       logAuditAction('CRISIS_TIMER_EXTENDED', activeCrisis.teamId, `Added ${secondsToAdd}s to crisis timer`, 'ADMIN');
     },
-    [activeCrisis, logAuditAction]
+    [activeCrisis, currentUser.id, currentUser.email, logAuditAction]
   );
 
   const resolveCrisisManually = useCallback(
     (teamId: string, reason: string) => {
       if (!activeCrisis) return;
       setActiveCrisis((prev) => (prev ? { ...prev, status: 'RESOLVED', tradeoffGivenUp: `Manual: ${reason}` } : null));
+      commandSync.dispatch('RESOLVE_CRISIS_MANUALLY', { teamId, reason }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
       logAuditAction('CRISIS_RESOLVED_MANUALLY', teamId, reason, 'ADMIN');
     },
-    [activeCrisis, logAuditAction]
+    [activeCrisis, currentUser.id, currentUser.email, logAuditAction]
   );
 
   const submitCrisisResponse = useCallback(
@@ -1479,6 +1624,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           version: (prev.version || 1) + 1,
         };
         offlineStorage.saveCanvasDraft(prev.teamId, updated);
+        setCanvasStore((store) => ({ ...store, [prev.teamId]: updated }));
         commandSync.dispatch('SUBMIT_CANVAS', {
           teamId: prev.teamId,
           canvas: updated,
@@ -1753,7 +1899,12 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Judge scoring
   const updateJudgingCriterion = useCallback((id: string, updates: Partial<JudgingCriteria>) => {
     setJudgingCriteria((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-  }, []);
+    commandSync.dispatch('UPDATE_JUDGING_CRITERIA', { id, updates }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
 
   const submitJudgeScore = useCallback(
     (score: Omit<JudgeScore, 'id' | 'submittedAt'>) => {
@@ -1874,6 +2025,27 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 
   // Lockdown
+  // Event config (server-authoritative economy toggles).
+  const updateEventConfig = useCallback((newConfig: Partial<EventConfig>) => {
+    setEventConfig((prev) => ({ ...prev, ...newConfig }));
+    commandSync.dispatch('UPDATE_EVENT_CONFIG', { config: newConfig }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
+
+  // Full results reveal: authoritative leaderboard broadcast + REVEAL phase.
+  const revealResults = useCallback(() => {
+    commandSync.dispatch('REVEAL_RESULTS', {}, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+    setEventStatusState('REVEAL');
+    logAuditAction('RESULTS_REVEALED', 'ALL_TEAMS', 'Final leaderboard revealed room-wide', 'ADMIN');
+  }, [currentUser.id, currentUser.email, logAuditAction]);
+
   const triggerLockdown = useCallback(() => {
     setIsLockdownActive(true);
     setEventStatusState('LOCKDOWN');
@@ -1895,9 +2067,21 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     logAuditAction('LOCKDOWN_STARTED', 'ALL', 'Lockdown started room-wide', 'ADMIN');
   }, [addAnnouncement, currentUser.id, currentUser.email, currentUser.name, logAuditAction]);
 
-  // Rehearsal One-Click Reset & Reseed
+  // Rehearsal One-Click Reset & Reseed.
+  // Clears ONLY simulation replica keys — the operator's identity, session
+  // tokens, device binding, theme, and API-origin hints survive the reset.
   const resetAndReseedSimulation = useCallback(() => {
-    localStorage.clear();
+    try {
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_PREFIX)) doomed.push(key);
+      }
+      doomed.forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem('zero_one_device_token');
+    } catch {
+      // storage blocked — in-memory reset below still applies
+    }
     setTeams(INITIAL_TEAMS);
     setMarketItems(INITIAL_MARKET_ITEMS);
     setPurchaseProposals([]);
@@ -1937,20 +2121,32 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     logAuditAction('EVENT_RESET_RESEEDED', 'ALL_SYSTEMS', '1-Click Rehearsal Reset & Reseed executed successfully', 'ADMIN');
   }, [currentUser.id, currentUser.email, currentUser.name, logAuditAction]);
 
-  // Snapshotting
+  // Snapshotting (export file mirrors the server snapshot shape closely
+  // enough for partial-safe restore: open proposals, auctions, trades,
+  // crisis, clock, lockdown, announcements, and config all travel along).
   const createSnapshot = useCallback(() => {
     const snapshot = {
       timestamp: new Date().toISOString(),
       eventStatus,
       eventConfig,
+      serverClock: { timeRemainingSeconds: serverTimeRemainingSeconds, isClockRunning },
+      isLockdownActive,
       teams,
       ledger,
       marketItems,
       inventory,
+      purchaseProposals,
       crisisCards,
+      activeCrisis,
+      activeAuction,
+      auctionBids,
+      trades,
       canvas,
+      artifacts,
       judgeScores,
       floorScores,
+      announcements,
+      liveScreenConfig,
       auditLogs,
     };
 
@@ -1963,19 +2159,34 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
 
     return JSON.stringify(snapshot, null, 2);
-  }, [eventStatus, eventConfig, teams, ledger, marketItems, inventory, crisisCards, canvas, judgeScores, floorScores, auditLogs, currentUser.id, currentUser.email]);
+  }, [eventStatus, eventConfig, serverTimeRemainingSeconds, isClockRunning, isLockdownActive, teams, ledger, marketItems, inventory, purchaseProposals, crisisCards, activeCrisis, activeAuction, auctionBids, trades, canvas, artifacts, judgeScores, floorScores, announcements, liveScreenConfig, auditLogs, currentUser.id, currentUser.email]);
 
   const restoreSnapshot = useCallback(
     (snapshotJson: string) => {
       try {
         const data = JSON.parse(snapshotJson);
         if (data.eventStatus) setEventStatusState(data.eventStatus);
-        if (data.teams) setTeams(data.teams);
+        if (data.eventConfig) setEventConfig((prev) => ({ ...prev, ...data.eventConfig }));
+        if (data.teams) setTeamsGuarded(data.teams);
         if (data.ledger) setLedger(data.ledger);
         if (data.marketItems) setMarketItems(data.marketItems);
         if (data.inventory) setInventory(data.inventory);
+        if (data.purchaseProposals) setPurchaseProposals(data.purchaseProposals);
         if (data.crisisCards) setCrisisCards(data.crisisCards);
+        if (data.activeCrisis !== undefined) setActiveCrisis(data.activeCrisis);
+        if (data.activeAuction !== undefined) setActiveAuction(data.activeAuction);
+        if (data.auctionBids) setAuctionBids(data.auctionBids);
+        if (data.trades) setTrades(data.trades);
         if (data.canvas) setCanvas(data.canvas);
+        if (data.artifacts) setArtifacts(data.artifacts);
+        if (data.judgeScores) setJudgeScores(data.judgeScores);
+        if (data.announcements) setAnnouncements(data.announcements);
+        if (data.liveScreenConfig) setLiveScreenConfig((prev) => ({ ...prev, ...data.liveScreenConfig }));
+        if (data.serverClock) {
+          setServerTimeRemainingSeconds(data.serverClock.timeRemainingSeconds);
+          setIsClockRunning(data.serverClock.isClockRunning);
+        }
+        if (data.isLockdownActive !== undefined) setIsLockdownActive(data.isLockdownActive);
 
         commandSync.dispatch('RESTORE_SNAPSHOT', {
           snapshotData: data,
@@ -1992,7 +2203,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return false;
       }
     },
-    [currentUser.id, currentUser.email, logAuditAction]
+    [currentUser.id, currentUser.email, logAuditAction, setTeamsGuarded]
   );
 
   const switchUser = useCallback((user: CodeScrietUser, role: SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC') => {
@@ -2093,12 +2304,125 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [currentUser.email, currentUser.id, currentUser.role, adminAuthorizations, serverIsSuperAdmin]
   );
 
+  // Authoritative Zero → One Context & Registration Synchronization
+  const fetchZeroOneContext = useCallback(async (): Promise<ZeroOneContext | null> => {
+    try {
+      const res = await zoFetch('/api/zero-one/context');
+      if (res.ok) {
+        const data = (await res.json()) as ZeroOneContext;
+        setZeroOneContext(data);
+        if (data.team) {
+          const squadMapped: Team = {
+            id: data.team.id,
+            teamCode: data.team.code,
+            name: data.team.name,
+            problemStatement: 'ZERO → ONE Startup Venture',
+            targetCustomer: 'Target Market Segment',
+            equitySoldPct: 0,
+            healthScore: 100,
+            healthBreakdown: {
+              financial: 100,
+              product: 100,
+              marketing: 100,
+              teamStability: 100,
+            },
+            status: 'ACTIVE',
+            currentRound: 'ROUND_1',
+            createdAt: new Date().toISOString(),
+            members: data.team.members.map((m) => ({
+              id: m.id,
+              userId: m.userId,
+              displayName: m.name,
+              email: m.email,
+              role: (m.simulationRole || (m.role === 'LEADER' ? 'CEO' : 'CTO')) as SimulationRole,
+              deviceToken: 'TOKEN-' + m.id,
+              active: true,
+              joinedAt: m.joinedAt || new Date().toISOString(),
+              lastActiveAt: new Date().toISOString(),
+            })),
+          };
+          setTeams((prev) => {
+            const exists = prev.some((t) => t.id === squadMapped.id);
+            if (!exists) return [squadMapped, ...prev];
+            return prev.map((t) => (t.id === squadMapped.id ? { ...t, ...squadMapped } : t));
+          });
+          setCurrentTeamId(squadMapped.id);
+        }
+        if (data.participant?.role) {
+          setCurrentRole(data.participant.role);
+        }
+        return data;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const claimSimulationRole = useCallback(
+    async (role: SimulationRole): Promise<{ success: boolean; message?: string; error?: string; code?: string }> => {
+      try {
+        const teamId = zeroOneContext?.team?.id || currentTeamId;
+        const res = await zoFetch('/api/zero-one/roles/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role, teamId }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setCurrentRole(role);
+          await fetchZeroOneContext();
+          return { success: true, message: data.message || 'Role assigned successfully' };
+        }
+        return {
+          success: false,
+          code: data.code || data.error?.code,
+          error: data.message || data.error?.message || data.error || 'Failed to claim role',
+        };
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error claiming role' };
+      }
+    },
+    [zeroOneContext?.team?.id, currentTeamId, fetchZeroOneContext]
+  );
+
+  const bindSimulationDevice = useCallback(
+    async (deviceId: string, deviceName?: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+      try {
+        const teamId = zeroOneContext?.team?.id || currentTeamId;
+        const res = await zoFetch('/api/zero-one/device/bind', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId,
+            deviceName: deviceName || 'Primary Workstation',
+            role: currentRole,
+            teamId,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await fetchZeroOneContext();
+          return { success: true, message: data.message || 'Device bound successfully' };
+        }
+        return {
+          success: false,
+          error: data.message || data.error || 'Failed to bind device',
+        };
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error binding device' };
+      }
+    },
+    [zeroOneContext?.team?.id, currentTeamId, currentRole, fetchZeroOneContext]
+  );
+
   // Authoritative State Refresh from Backend (requirement 13 & 23)
   const refreshAuthorizationState = useCallback(async () => {
     try {
       const [stateRes, authRes] = await Promise.all([
         zoFetch('/api/state'),
         zoFetch('/api/auth/me'),
+        fetchZeroOneContext(),
       ]);
 
       if (authRes.ok) {
@@ -2142,7 +2466,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch {
       // offline fallback
     }
-  }, []);
+  }, [fetchZeroOneContext]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -2499,6 +2823,17 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, [currentUser, currentRole, isAdminVerified, isSuperAdmin, getAdminStatus, adminAuthorizations]);
 
+  // Live screen stage config (server-authoritative so the projector wall on
+  // another machine follows the control center).
+  const updateLiveScreenConfig = useCallback((cfg: Partial<LiveScreenConfig>) => {
+    setLiveScreenConfig((prev) => ({ ...prev, ...cfg }));
+    commandSync.dispatch('UPDATE_LIVE_SCREEN', { config: cfg }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+  }, [currentUser.id, currentUser.email]);
+
   const value = useMemo(
     () => ({
       currentUser,
@@ -2509,17 +2844,22 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       switchUser,
       isLoggedIn: Boolean(currentUser.email) && currentRole !== 'PUBLIC',
       logout,
+      zeroOneContext,
+      fetchZeroOneContext,
+      claimSimulationRole,
+      bindSimulationDevice,
       authorizationState,
       eventStatus,
       setEventStatus,
       eventConfig,
-      updateEventConfig: (cfg: Partial<EventConfig>) => setEventConfig((prev) => ({ ...prev, ...cfg })),
+      updateEventConfig,
       serverTimeRemainingSeconds,
       isClockRunning,
       toggleClock,
       resetClock,
       isLockdownActive,
       triggerLockdown,
+      revealResults,
       teams,
       currentTeam,
       setCurrentTeamId,
@@ -2550,6 +2890,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       resolveCrisisManually,
       submitCrisisResponse,
       canvas,
+      canvasStore,
       updateCanvasField,
       artifacts,
       submitArtifact,
@@ -2568,7 +2909,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       floorScores,
       recalculateFloorScores,
       liveScreenConfig,
-      updateLiveScreenConfig: (cfg: Partial<LiveScreenConfig>) => setLiveScreenConfig((prev) => ({ ...prev, ...cfg })),
+      updateLiveScreenConfig,
       announcements,
       addAnnouncement,
       auditLogs,
@@ -2602,15 +2943,21 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       authorizationState,
       switchUser,
       logout,
+      zeroOneContext,
+      fetchZeroOneContext,
+      claimSimulationRole,
+      bindSimulationDevice,
       eventStatus,
       setEventStatus,
       eventConfig,
+      updateEventConfig,
       serverTimeRemainingSeconds,
       isClockRunning,
       toggleClock,
       resetClock,
       isLockdownActive,
       triggerLockdown,
+      revealResults,
       teams,
       currentTeam,
       updateTeam,
@@ -2640,6 +2987,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       resolveCrisisManually,
       submitCrisisResponse,
       canvas,
+      canvasStore,
       updateCanvasField,
       artifacts,
       submitArtifact,
@@ -2658,6 +3006,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       floorScores,
       recalculateFloorScores,
       liveScreenConfig,
+      updateLiveScreenConfig,
       announcements,
       addAnnouncement,
       auditLogs,

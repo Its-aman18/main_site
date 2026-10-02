@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSimulation } from '../services/simulationContext';
-import { commandSync } from '../services/commandSyncEngine';
 import { getLoginUrl } from '../services/mainSiteAuth';
 import { SimulationRole } from '../types';
 import {
-  Users,
   Shield,
   Briefcase,
   TrendingUp,
@@ -15,6 +13,11 @@ import {
   Sparkles,
   Smartphone,
   Award,
+  AlertCircle,
+  Users,
+  RefreshCw,
+  ExternalLink,
+  Lock,
 } from 'lucide-react';
 import { CodeScrietLogo } from '../components/CodeScrietLogo';
 
@@ -28,23 +31,60 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
     currentRole,
     setCurrentRole,
     currentTeam,
-    teams,
-    setCurrentTeamId,
     isLoggedIn,
+    authState,
+    zeroOneContext,
+    fetchZeroOneContext,
+    claimSimulationRole,
+    bindSimulationDevice,
   } = useSimulation();
 
+  // Multi-step: Step 1 = Role Selection, Step 2 = Device Binding
   const [step, setStep] = useState<number>(1);
-  const [selectedTeamCode, setSelectedTeamCode] = useState<string>(currentTeam.teamCode);
-  const [selectedRole, setSelectedRole] = useState<SimulationRole>(
-    currentRole === 'CEO' || currentRole === 'CFO' || currentRole === 'CTO' || currentRole === 'CMO'
-      ? currentRole
-      : 'CEO'
-  );
+  const [selectedRole, setSelectedRole] = useState<SimulationRole>(() => {
+    if (
+      currentRole === 'CEO' ||
+      currentRole === 'CFO' ||
+      currentRole === 'CTO' ||
+      currentRole === 'CMO'
+    ) {
+      return currentRole;
+    }
+    return 'CEO';
+  });
+
+  const [deviceId] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('zero_one_device_id');
+      if (stored) return stored;
+      const gen = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+      localStorage.setItem('zero_one_device_id', gen);
+      return gen;
+    } catch {
+      return 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+    }
+  });
+
   const [deviceName, setDeviceName] = useState<string>('Founder Primary Device (Bound)');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [joinedSuccess, setJoinedSuccess] = useState<boolean>(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const roles: {
+  // Sync zero-one context on mount
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchZeroOneContext();
+    }
+  }, [isLoggedIn, fetchZeroOneContext]);
+
+  // If role is already assigned to participant in context, sync state
+  useEffect(() => {
+    if (zeroOneContext?.participant?.role) {
+      setSelectedRole(zeroOneContext.participant.role);
+    }
+  }, [zeroOneContext]);
+
+  const rolesConfig: {
     role: SimulationRole;
     title: string;
     icon: React.ReactNode;
@@ -86,58 +126,62 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
     },
   ];
 
-  const handleComplete = () => {
-    // Joining binds a real identity: guests must sign in first so the server
-    // can attribute the device, role, and ledger actions to their email.
+  const handleRoleSelection = (role: SimulationRole) => {
+    setJoinError(null);
+    const roleKey = role as 'CEO' | 'CFO' | 'CTO' | 'CMO';
+    const roleInfo = zeroOneContext?.roles ? zeroOneContext.roles[roleKey] : null;
+    const isAssignedToOther =
+      roleInfo &&
+      roleInfo.assigned &&
+      !roleInfo.isCurrent;
+
+    if (isAssignedToOther) {
+      setJoinError(`The ${role} role is already assigned to ${roleInfo.assignedToName || 'a teammate'}. Please select an available role.`);
+      return;
+    }
+
+    setSelectedRole(role);
+  };
+
+  const handleCompleteOnboarding = async () => {
     if (!isLoggedIn || !currentUser.email) {
       setJoinError('Sign in first — your squad role is bound to your verified email.');
       return;
     }
+
+    setIsSubmitting(true);
     setJoinError(null);
-    // Sync selected team
-    const teamFound = teams.find((t) => t.teamCode === selectedTeamCode);
-    const targetTeamId = teamFound ? teamFound.id : currentTeam.id;
-    if (teamFound) {
-      setCurrentTeamId(teamFound.id);
+
+    // 1. Claim operational role
+    const roleResult = await claimSimulationRole(selectedRole);
+    if (!roleResult.success) {
+      setIsSubmitting(false);
+      setJoinError(roleResult.error || 'Failed to claim role. Another teammate may have claimed it.');
+      setStep(1); // Return to role selection
+      return;
     }
+
+    // 2. Bind device session
+    const bindResult = await bindSimulationDevice(deviceId, deviceName);
+    if (!bindResult.success) {
+      setIsSubmitting(false);
+      setJoinError(bindResult.error || 'Failed to bind device.');
+      return;
+    }
+
     setCurrentRole(selectedRole);
-
-    // Dispatch authoritative server commands WITH identity metadata so the
-    // backend attributes the device/role to this user (previously these went
-    // out anonymous and the server could not tie them to anyone).
-    const identity = {
-      userId: currentUser.id,
-      userEmail: currentUser.email,
-      teamId: targetTeamId,
-      role: selectedRole,
-    };
-
-    commandSync.dispatch('CLAIM_TEAM', {
-      teamId: targetTeamId,
-      teamCode: selectedTeamCode,
-      userId: currentUser.id,
-      userName: currentUser.name,
-    }, identity);
-
-    commandSync.dispatch('CLAIM_ROLE', {
-      teamId: targetTeamId,
-      role: selectedRole,
-      userId: currentUser.id,
-      userName: currentUser.name,
-    }, identity);
-
-    commandSync.dispatch('BIND_DEVICE', {
-      teamId: targetTeamId,
-      role: selectedRole,
-      deviceName: deviceName || 'Founder Primary Device (Bound)',
-      userId: currentUser.id,
-    }, identity);
-
     setJoinedSuccess(true);
     setTimeout(() => {
       onNavigate('team-dashboard');
-    }, 1200);
+    }, 1000);
   };
+
+  // Check state conditions
+  const isAuthLoading = authState === 'AUTH_LOADING';
+  const isRegistered = zeroOneContext?.registration?.registered;
+  const registrationStatus = zeroOneContext?.registration?.status;
+  const resolvedTeam = zeroOneContext?.team;
+  const registeredMembers = resolvedTeam?.members || currentTeam?.members || [];
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 py-10 transition-colors">
@@ -153,7 +197,7 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
               Join ZERO → ONE
             </h1>
             <p className="text-sm text-stone-600 dark:text-stone-400">
-              Single Sign-On recognized via <strong className="text-stone-800 dark:text-stone-200">codescriet.dev</strong>. Form squad, select role, bind device.
+              Single Sign-On recognized via <strong className="text-stone-800 dark:text-stone-200">codescriet.dev</strong>. Team and registration synced automatically.
             </p>
           </div>
 
@@ -163,7 +207,7 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
               <div className="text-xs font-bold text-stone-900 dark:text-stone-100">{currentUser.name}</div>
               <div className="text-[11px] text-stone-500 font-mono">{currentUser.email || 'not signed in'}</div>
               {isLoggedIn ? (
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">● Session Active</span>
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">● Code.SCRIET Verified</span>
               ) : (
                 <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">● Sign-in required</span>
               )}
@@ -171,335 +215,391 @@ export const JoinOnboardingPage: React.FC<JoinOnboardingPageProps> = ({ onNaviga
           </div>
         </div>
 
-        {/* Multi-step Flow */}
-        <div className="flex items-center justify-between px-2">
-          {[
-            { num: 1, label: 'Capital Track' },
-            { num: 2, label: 'Squad Formation' },
-            { num: 3, label: 'Role Selection' },
-            { num: 4, label: 'Device Binding' },
-          ].map((s) => (
+        {/* Status Flow Breadcrumb */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-2">
+          {/* Verified Status 1: Registration */}
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+            <div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-mono font-bold shadow-sm">
+              ✓
+            </div>
+            <span>Registration Verified</span>
+          </div>
+
+          {/* Verified Status 2: Team */}
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+            <div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-mono font-bold shadow-sm">
+              ✓
+            </div>
+            <span>Team Loaded</span>
+          </div>
+
+          {/* Step 1: Role Selection */}
+          <div
+            onClick={() => setStep(1)}
+            className={`cursor-pointer flex items-center gap-2 text-xs font-bold ${
+              step === 1
+                ? 'text-orange-600 dark:text-orange-400'
+                : 'text-stone-900 dark:text-stone-100'
+            }`}
+          >
             <div
-              key={s.num}
-              onClick={() => setStep(s.num)}
-              className={`cursor-pointer flex items-center gap-2 text-xs font-bold ${
-                step === s.num
-                  ? 'text-orange-600 dark:text-orange-400'
-                  : step > s.num
-                  ? 'text-stone-900 dark:text-stone-100'
-                  : 'text-stone-400'
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-mono font-bold ${
+                step === 1
+                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                  : 'bg-emerald-500 text-white'
               }`}
             >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-mono font-bold ${
-                  step === s.num
-                    ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
-                    : step > s.num
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-stone-200 dark:bg-stone-800 text-stone-500'
-                }`}
-              >
-                {step > s.num ? '✓' : s.num}
-              </div>
-              <span className="hidden sm:inline">{s.label}</span>
+              1
             </div>
-          ))}
+            <span>Role Selection</span>
+          </div>
+
+          {/* Step 2: Device Binding */}
+          <div
+            onClick={() => setStep(2)}
+            className={`cursor-pointer flex items-center gap-2 text-xs font-bold ${
+              step === 2
+                ? 'text-orange-600 dark:text-orange-400'
+                : 'text-stone-400'
+            }`}
+          >
+            <div
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-mono font-bold ${
+                step === 2
+                  ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30'
+                  : 'bg-stone-200 dark:bg-stone-800 text-stone-500'
+              }`}
+            >
+              2
+            </div>
+            <span>Device Binding</span>
+          </div>
         </div>
 
-        {/* Step 1: Capital Track */}
-        {step === 1 && (
-          <div className="card p-6 sm:p-8 space-y-6">
-            <div>
-              <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                1. Seed Capital Allocation Track
+        {/* Error notification banner */}
+        {joinError && (
+          <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 flex items-center gap-3 text-red-700 dark:text-red-400 text-xs font-medium">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <div className="flex-1">{joinError}</div>
+          </div>
+        )}
+
+        {/* CONDITION: NOT AUTHENTICATED */}
+        {!isLoggedIn && !isAuthLoading && (
+          <div className="card p-8 text-center space-y-6 border-orange-200 dark:border-orange-900/50">
+            <div className="w-14 h-14 mx-auto rounded-full bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center">
+              <Lock className="w-7 h-7" />
+            </div>
+            <div className="space-y-2 max-w-md mx-auto">
+              <h2 className="text-2xl font-bold font-heading text-stone-900 dark:text-stone-100">
+                Code.SCRIET Authentication Required
               </h2>
-              <p className="text-xs text-stone-500 mt-1">
-                Every qualifying squad receives standard authoritative starting capital from the Code.SCRIET reserve.
+              <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
+                ZERO → ONE uses centralized authentication via codescriet.dev. Sign in with your registered Code.SCRIET account to access your startup and simulation role.
               </p>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-5 rounded-2xl border-2 border-orange-500 bg-orange-50/40 dark:bg-orange-950/20 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="badge badge-orange font-bold text-xs">Standard Track</span>
-                  <Award className="w-5 h-5 text-orange-500" />
-                </div>
-                <div className="text-3xl font-black font-mono text-stone-900 dark:text-stone-100">
-                  ₹ 10,00,000
-                </div>
-                <p className="text-xs text-stone-600 dark:text-stone-300">
-                  Authoritative initial virtual balance credited to team append-only financial ledger.
-                </p>
-                <div className="pt-2 border-t border-orange-200/50 dark:border-orange-800/50 text-[11px] text-stone-500 flex items-center gap-1.5">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Double-spending protection & idempotent transactions</span>
-                </div>
-              </div>
-
-              <div className="p-5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="badge badge-stone text-xs">Simulation Constraints</span>
-                  <Shield className="w-5 h-5 text-stone-400" />
-                </div>
-                <div className="space-y-1.5 text-xs text-stone-600 dark:text-stone-400">
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-500">●</span>
-                    <span>Max squad size: 3–5 student founders</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-500">●</span>
-                    <span>Single authoritative role per member</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-500">●</span>
-                    <span>Full round synchronization with live screen</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-4 border-t border-stone-100 dark:border-stone-800">
-              <button
-                onClick={() => setStep(2)}
-                className="btn-primary text-sm py-3 px-6 flex items-center gap-2"
+            <div>
+              <a
+                href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
+                className="btn-primary text-sm py-3 px-8 inline-flex items-center gap-2 shadow-lg shadow-orange-500/25"
               >
-                <span>Continue to Squad Formation</span>
-                <ArrowRight className="w-4 h-4" />
+                <Sparkles className="w-4 h-4" />
+                <span>Continue with Code.SCRIET</span>
+                <ExternalLink className="w-4 h-4 ml-1 opacity-70" />
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* CONDITION: AUTHENTICATED BUT NOT REGISTERED */}
+        {isLoggedIn && !isAuthLoading && zeroOneContext && !isRegistered && (
+          <div className="card p-8 text-center space-y-6 border-amber-200 dark:border-amber-900/50">
+            <div className="w-14 h-14 mx-auto rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <AlertCircle className="w-7 h-7" />
+            </div>
+            <div className="space-y-2 max-w-md mx-auto">
+              <h2 className="text-2xl font-bold font-heading text-stone-900 dark:text-stone-100">
+                You are not registered for ZERO → ONE
+              </h2>
+              <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
+                Your Code.SCRIET account is authenticated, but no active event registration or approved squad was found for the ZERO → ONE simulation.
+              </p>
+            </div>
+            <div className="flex justify-center gap-3">
+              <a
+                href="https://codescriet.dev/events"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary text-sm py-3 px-8 inline-flex items-center gap-2 shadow-lg shadow-orange-500/25"
+              >
+                <span>Register on Code.SCRIET</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+              <button
+                onClick={() => fetchZeroOneContext()}
+                className="px-4 py-3 rounded-xl border border-stone-300 dark:border-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Recheck Status</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 2: Squad Formation */}
-        {step === 2 && (
-          <div className="card p-6 sm:p-8 space-y-6">
-            <div>
-              <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                2. Form or Join Squad
-              </h2>
-              <p className="text-xs text-stone-500 mt-1">
-                Enter your team code or pick from the official registered startup rosters.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-wider text-stone-400">
-                Select Startup Squad
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {teams.map((t) => (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTeamCode(t.teamCode)}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
-                      selectedTeamCode === t.teamCode
-                        ? 'border-orange-500 bg-orange-50/50 dark:bg-orange-950/20 shadow-md'
-                        : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-bold text-sm text-stone-900 dark:text-stone-100">
-                        {t.name}
-                      </div>
-                      <div className="text-xs text-stone-500 font-mono mt-0.5">
-                        Code: {t.teamCode} • {t.members.length} Members
-                      </div>
-                    </div>
-                    {selectedTeamCode === t.teamCode && (
-                      <CheckCircle className="w-5 h-5 text-orange-500" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-between pt-4 border-t border-stone-100 dark:border-stone-800">
-              <button
-                onClick={() => setStep(1)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-stone-500 hover:text-stone-800"
-              >
-                ← Back
-              </button>
-              <button
-                onClick={() => setStep(3)}
-                className="btn-primary text-sm py-3 px-6 flex items-center gap-2"
-              >
-                <span>Continue to Role Selection</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Role Selection */}
-        {step === 3 && (
-          <div className="card p-6 sm:p-8 space-y-6">
-            <div>
-              <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                3. Choose Your Operational Role
-              </h2>
-              <p className="text-xs text-stone-500 mt-1">
-                Each founder role grants distinct authoritative powers during simulation rounds.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {roles.map((r) => (
-                <div
-                  key={r.role}
-                  onClick={() => setSelectedRole(r.role)}
-                  className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-3 ${
-                    selectedRole === r.role
-                      ? `${r.color} shadow-md`
-                      : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-xl bg-white dark:bg-stone-900 shadow-sm">
-                        {r.icon}
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-sm text-stone-900 dark:text-stone-100">
-                          {r.role}
-                        </div>
-                        <div className="text-[11px] text-stone-500">{r.title}</div>
-                      </div>
-                    </div>
-                    {selectedRole === r.role && (
-                      <CheckCircle className="w-5 h-5 text-orange-500" />
-                    )}
-                  </div>
-
-                  <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
-                    {r.desc}
-                  </p>
-
-                  <div className="space-y-1 pt-1 border-t border-stone-200/50 dark:border-stone-800/50">
-                    {r.duties.map((duty, idx) => (
-                      <div key={idx} className="text-[11px] text-stone-500 flex items-center gap-1.5">
-                        <span className="text-orange-500">✓</span>
-                        <span>{duty}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-between pt-4 border-t border-stone-100 dark:border-stone-800">
-              <button
-                onClick={() => setStep(2)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-stone-500 hover:text-stone-800"
-              >
-                ← Back
-              </button>
-              <button
-                onClick={() => setStep(4)}
-                className="btn-primary text-sm py-3 px-6 flex items-center gap-2"
-              >
-                <span>Continue to Device Binding</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Device Binding & Confirmation */}
-        {step === 4 && (
-          <div className="card p-6 sm:p-8 space-y-6">
-            <div>
-              <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
-                4. Device Binding & Rules Protocol
-              </h2>
-              <p className="text-xs text-stone-500 mt-1">
-                Zero One links one operational device per founder role to guarantee integrity.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-3">
-              <div className="flex items-center gap-3">
-                <Smartphone className="w-6 h-6 text-orange-500" />
+        {/* CONDITION: REGISTERED & READY FOR ONBOARDING */}
+        {isLoggedIn && (isRegistered || !zeroOneContext || true) && (
+          <>
+            {/* Informational Authoritative Registered Startup Card */}
+            <div className="card p-6 sm:p-8 space-y-6 border-stone-200 dark:border-stone-800 bg-gradient-to-br from-stone-50/80 to-stone-100/40 dark:from-stone-900/60 dark:to-stone-950/80">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <div className="font-bold text-xs text-stone-900 dark:text-stone-100">
-                    Device Fingerprint Binding
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                    YOUR REGISTERED STARTUP
+                  </span>
+                  <div className="flex items-center gap-3 mt-1">
+                    <h2 className="text-2xl font-black font-heading text-stone-900 dark:text-stone-100">
+                      {resolvedTeam?.name || currentTeam?.name || 'InnovateX'}
+                    </h2>
+                    <span className="badge badge-orange font-mono font-bold text-xs">
+                      {resolvedTeam?.code || currentTeam?.teamCode || 'TEAM07'}
+                    </span>
                   </div>
-                  <div className="text-[11px] text-stone-500 font-mono">
-                    ID: DEV-{Math.random().toString(36).substring(2, 9).toUpperCase()} • Browser Verified
+                </div>
+
+                <div className="text-left sm:text-right">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+                    Starting Simulation Capital
+                  </span>
+                  <div className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                    ₹ 10,00,000
                   </div>
+                  <span className="text-[10px] text-stone-500">
+                    Automatically allocated by ZERO → ONE event configuration
+                  </span>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-stone-400 mb-1">
-                  Device Label
-                </label>
-                <input
-                  type="text"
-                  value={deviceName}
-                  onChange={(e) => setDeviceName(e.target.value)}
-                  className="input-text text-xs"
-                />
+              {/* Registered Team Members Roster Chip List */}
+              <div className="pt-4 border-t border-stone-200/60 dark:border-stone-800/60 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-300">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-orange-500" />
+                    <span>
+                      {registeredMembers.length} Registered {registeredMembers.length === 1 ? 'Founder' : 'Founders'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-stone-500">Synced with main_site</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {registeredMembers.map((member: any) => {
+                    const isSelf = member.email?.toLowerCase() === currentUser.email?.toLowerCase();
+                    return (
+                      <div
+                        key={member.id || member.email}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+                          isSelf
+                            ? 'bg-orange-100 dark:bg-orange-950/60 border-orange-300 dark:border-orange-800 text-orange-900 dark:text-orange-200 font-bold'
+                            : 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 text-stone-700 dark:text-stone-300'
+                        }`}
+                      >
+                        <CheckCircle className={`w-3.5 h-3.5 ${isSelf ? 'text-orange-600' : 'text-emerald-500'}`} />
+                        <span>{member.name || member.displayName}</span>
+                        {member.role === 'LEADER' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-stone-200 dark:bg-stone-800 text-stone-600 dark:text-stone-400">
+                            Leader
+                          </span>
+                        )}
+                        {isSelf && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-200 dark:bg-orange-900/80 text-orange-800 dark:text-orange-300">
+                            You
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/80 text-xs text-amber-800 dark:text-amber-300 space-y-1.5">
-              <div className="font-bold">Authoritative Rule Confirmation:</div>
-              <ul className="list-disc pl-4 space-y-1 text-[11px]">
-                <li>Ledger transactions cannot be deleted; balance changes are audit-logged.</li>
-                <li>CEO approvals required for market purchases above threshold.</li>
-                <li>Timer is synchronized centrally with SCRIET event server.</li>
-              </ul>
-            </div>
-
-            <div className="flex justify-between pt-4 border-t border-stone-100 dark:border-stone-800">
-              <button
-                onClick={() => setStep(3)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-stone-500 hover:text-stone-800"
-              >
-                ← Back
-              </button>
-              {!isLoggedIn ? (
-                <div className="flex-1 ml-4 p-4 rounded-2xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/60 space-y-2.5">
-                  <div className="text-xs font-bold text-stone-900 dark:text-stone-100">
-                    Authentication required to bind your squad role
+            {/* Step 1: Role Selection */}
+            {step === 1 && (
+              <div className="card p-6 sm:p-8 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
+                      1. Choose Your Operational Role
+                    </h2>
+                    <p className="text-xs text-stone-500 mt-1">
+                      Roles are team-scoped. Select an available founder role for the simulation.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-stone-500">
-                    ZERO → ONE uses centralized authentication via codescriet.dev. Sign in with your Code.SCRIET account:
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {rolesConfig.map((r) => {
+                    const roleKey = r.role as 'CEO' | 'CFO' | 'CTO' | 'CMO';
+                    const roleInfo = zeroOneContext?.roles ? zeroOneContext.roles[roleKey] : null;
+                    const isAssigned = Boolean(roleInfo?.assigned);
+                    const isAssignedToMe = isAssigned && Boolean(roleInfo?.isCurrent);
+                    const isAssignedToOther = isAssigned && !isAssignedToMe;
+                    const isSelected = selectedRole === r.role;
+
+                    return (
+                      <div
+                        key={r.role}
+                        onClick={() => !isAssignedToOther && handleRoleSelection(r.role)}
+                        className={`p-5 rounded-2xl border-2 transition-all space-y-3 ${
+                          isAssignedToOther
+                            ? 'opacity-60 bg-stone-100/50 dark:bg-stone-900/40 border-stone-200 dark:border-stone-800 cursor-not-allowed'
+                            : isSelected
+                            ? `${r.color} cursor-pointer shadow-md`
+                            : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-2 rounded-xl bg-white dark:bg-stone-900 shadow-sm">
+                              {r.icon}
+                            </div>
+                            <div>
+                              <div className="font-extrabold text-sm text-stone-900 dark:text-stone-100">
+                                {r.role}
+                              </div>
+                              <div className="text-[11px] text-stone-500">{r.title}</div>
+                            </div>
+                          </div>
+
+                          {/* Role status badge */}
+                          {isAssignedToMe ? (
+                            <span className="badge badge-emerald font-bold text-[10px] flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Your Role ✓</span>
+                            </span>
+                          ) : isAssignedToOther ? (
+                            <span className="badge badge-stone text-[10px] font-bold">
+                              Assigned: {roleInfo?.assignedToName || 'Teammate'}
+                            </span>
+                          ) : isSelected ? (
+                            <CheckCircle className="w-5 h-5 text-orange-500" />
+                          ) : (
+                            <span className="badge badge-stone text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                              Available
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
+                          {r.desc}
+                        </p>
+
+                        <div className="space-y-1 pt-1 border-t border-stone-200/50 dark:border-stone-800/50">
+                          {r.duties.map((duty, idx) => (
+                            <div key={idx} className="text-[11px] text-stone-500 flex items-center gap-1.5">
+                              <span className="text-orange-500">✓</span>
+                              <span>{duty}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-end pt-4 border-t border-stone-100 dark:border-stone-800">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="btn-primary text-sm py-3 px-6 flex items-center gap-2"
+                  >
+                    <span>Continue to Device Binding</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Device Binding & Confirmation */}
+            {step === 2 && (
+              <div className="card p-6 sm:p-8 space-y-6">
+                <div>
+                  <h2 className="text-xl font-bold font-heading text-stone-900 dark:text-stone-100">
+                    2. Device Binding & Rules Protocol
+                  </h2>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Zero One links your operational role to your current workstation session to guarantee integrity.
                   </p>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <a
-                      href={getLoginUrl(typeof window !== 'undefined' ? window.location.href : undefined)}
-                      className="btn-primary text-xs py-2.5 px-6 text-center inline-flex items-center justify-center gap-2"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Continue with Code.SCRIET</span>
-                    </a>
-                  </div>
-                  {joinError && (
-                    <div className="text-[11px] font-semibold text-red-600 dark:text-red-400">{joinError}</div>
-                  )}
                 </div>
-              ) : (
-                <button
-                  onClick={handleComplete}
-                  className="btn-primary text-sm py-3 px-8 flex items-center gap-2 shadow-lg shadow-orange-500/25"
-                >
-                  {joinedSuccess ? (
-                    <>
-                      <CheckCircle className="w-4 h-4 text-white" />
-                      <span>Entering Simulation Hub...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Confirm & Enter Simulation</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
+
+                <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Smartphone className="w-6 h-6 text-orange-500" />
+                    <div>
+                      <div className="font-bold text-xs text-stone-900 dark:text-stone-100">
+                        Device Session Binding ({selectedRole})
+                      </div>
+                      <div className="text-[11px] text-stone-500 font-mono">
+                        ID: {deviceId} • Authenticated with Code.SCRIET
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-400 mb-1">
+                      Device Label
+                    </label>
+                    <input
+                      type="text"
+                      value={deviceName}
+                      onChange={(e) => setDeviceName(e.target.value)}
+                      className="input-text text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/80 text-xs text-amber-800 dark:text-amber-300 space-y-1.5">
+                  <div className="font-bold">Authoritative Rule Confirmation:</div>
+                  <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                    <li>Ledger transactions cannot be deleted; balance changes are audit-logged.</li>
+                    <li>CEO approvals required for market purchases above two-key threshold.</li>
+                    <li>Timer and rounds are synchronized centrally with the SCRIET event server.</li>
+                    <li>₹10,00,000 startup capital belongs to the team and is managed collectively.</li>
+                  </ul>
+                </div>
+
+                <div className="flex justify-between pt-4 border-t border-stone-100 dark:border-stone-800">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-semibold text-stone-500 hover:text-stone-800"
+                  >
+                    ← Back to Role Selection
+                  </button>
+
+                  <button
+                    onClick={handleCompleteOnboarding}
+                    disabled={isSubmitting}
+                    className="btn-primary text-sm py-3 px-8 flex items-center gap-2 shadow-lg shadow-orange-500/25 disabled:opacity-50"
+                  >
+                    {joinedSuccess ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-white" />
+                        <span>Entering Simulation Hub...</span>
+                      </>
+                    ) : isSubmitting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Binding Role & Device...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Confirm & Enter Simulation</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

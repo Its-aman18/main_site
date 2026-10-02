@@ -11,7 +11,12 @@
     "backend": "tsx server/standaloneServer.ts",
     "start": "node --import tsx server/standaloneServer.ts",
     "test:engine": "node test_engine.cjs",
-    "test:production": "node test_production_engine.cjs"
+    "test:auth": "node test_auth.cjs",
+    "test:readiness": "node test_event_day_readiness.cjs",
+    "test:production": "node test_production_engine.cjs",
+    "test:views": "node test_runtime_views.cjs",
+    "test:registration": "node test_registration_team_sync.cjs",
+    "test:all": "node test_engine.cjs && node test_auth.cjs && node test_event_day_readiness.cjs && node test_production_engine.cjs && node test_runtime_views.cjs && node test_registration_team_sync.cjs"
   },
   "dependencies": {
     "@types/canvas-confetti": "^1.9.0",

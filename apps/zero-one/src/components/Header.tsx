@@ -103,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-[#EFE8DD] dark:border-[#202432] bg-[#FAF8F5]/90 dark:bg-[#07080B]/90 backdrop-blur-md transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Left: Brand Identity */}
         <div className="flex items-center gap-3 sm:gap-5">
           <div
@@ -226,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 hover:border-orange-500 transition-colors"
             >
               <Briefcase className="w-3.5 h-3.5 text-orange-500" />
-              <span>{currentTeam.teamCode}</span>
+              <span>{currentTeam?.teamCode || '—'}</span>
               <ChevronDown className="w-3 h-3 text-stone-400" />
             </button>
 
@@ -287,8 +287,12 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
               className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:border-orange-500 transition-colors"
             >
               <img
-                src={currentUser.avatarUrl}
+                src={currentUser.avatarUrl || '/logo.png'}
                 alt={currentUser.name}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (!img.src.endsWith('/logo.png')) img.src = '/logo.png';
+                }}
                 className="w-7 h-7 rounded-full object-cover border border-orange-500"
               />
               <span className="text-xs font-bold text-stone-900 dark:text-stone-100 hidden sm:inline">

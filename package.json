@@ -31,6 +31,7 @@
     "zero-one:preview": "npm run preview --workspace=apps/zero-one",
     "zero-one:test": "npm run test:engine --workspace=apps/zero-one",
     "seed:zero-one-event": "node scripts/seed-zero-one-event.mjs",
+    "demo:zero-one": "node scripts/zero-one-fake-event-run.mjs",
     "verify:zero-one": "node scripts/verify-zero-one.mjs && npx tsx scripts/verify-zero-one-jwt.cjs",
     "dev:all": "concurrently -n \"API,WEB,PLAYGROUND,ZERO-ONE\" -c \"blue,green,magenta,yellow\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/playground\" \"npm run dev --workspace=apps/zero-one\"",
     "build:all": "npm run build --workspace=apps/web && npm run build --workspace=apps/api && npm run build --workspace=apps/playground && npm run build --workspace=apps/zero-one",

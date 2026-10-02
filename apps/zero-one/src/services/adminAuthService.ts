@@ -86,7 +86,7 @@ export const INITIAL_ADMIN_AUTHORIZATIONS: AdminAuthorization[] = [
   },
   {
     id: 'auth-root-seed-admin',
-    userId: 'usr-root-admin',
+    userId: '7b9962b4-a08c-4d24-9f28-8c722d81d20f',
     email: 'admin@example.com',
     name: 'Code.SCRIET Seed Super Admin',
     role: 'SUPER_ADMIN',

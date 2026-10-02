@@ -11,9 +11,13 @@ export const InventoryTransactionsPage: React.FC<InventoryTransactionsPageProps>
   initialTab = 'INVENTORY',
   onNavigate,
 }) => {
-  const { inventory, ledger, getBalance, reversePurchase, eventConfig } = useSimulation();
+  const { inventory, ledger, getBalance, reversePurchase, eventConfig, currentTeam } = useSimulation();
   const [activeTab, setActiveTab] = useState<'INVENTORY' | 'TRANSACTIONS'>(initialTab);
   const [feedback, setFeedback] = useState<string | null>(null);
+
+  // Squad-scoped views: a founder sees only their own team's assets/ledger.
+  const teamInventory = inventory.filter((i) => i.teamId === currentTeam.id);
+  const teamLedger = ledger.filter((e) => e.teamId === currentTeam.id);
 
   const balance = getBalance();
 
@@ -47,7 +51,7 @@ export const InventoryTransactionsPage: React.FC<InventoryTransactionsPageProps>
                     : 'text-stone-600 dark:text-stone-400'
                 }`}
               >
-                Inventory ({inventory.length})
+                Inventory ({teamInventory.length})
               </button>
               <button
                 onClick={() => setActiveTab('TRANSACTIONS')}
@@ -57,7 +61,7 @@ export const InventoryTransactionsPage: React.FC<InventoryTransactionsPageProps>
                     : 'text-stone-600 dark:text-stone-400'
                 }`}
               >
-                Ledger ({ledger.length})
+                Ledger ({teamLedger.length})
               </button>
             </div>
 
@@ -80,12 +84,12 @@ export const InventoryTransactionsPage: React.FC<InventoryTransactionsPageProps>
         {/* Tab 1: Inventory List */}
         {activeTab === 'INVENTORY' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {inventory.length === 0 ? (
+            {teamInventory.length === 0 ? (
               <div className="col-span-full card p-12 text-center text-stone-400 text-sm">
                 No items in inventory. Visit the Digital Market to purchase resources.
               </div>
             ) : (
-              inventory.map((item) => (
+              teamInventory.map((item) => (
                 <div key={item.id} className="card p-5 space-y-2 border hover:border-orange-500 transition-colors">
                   <div className="flex items-center justify-between">
                     <span className="badge badge-amber text-[10px]">
@@ -127,7 +131,7 @@ export const InventoryTransactionsPage: React.FC<InventoryTransactionsPageProps>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 dark:divide-stone-800 font-mono">
-                  {ledger.map((entry) => {
+                  {teamLedger.map((entry) => {
                     const isDebit = entry.type === 'DEBIT';
                     const elapsedSecs = (Date.now() - new Date(entry.createdAt).getTime()) / 1000;
                     const canUndo = isDebit && elapsedSecs <= eventConfig.undoWindowSeconds;

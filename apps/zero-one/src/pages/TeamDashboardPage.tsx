@@ -58,7 +58,11 @@ export const TeamDashboardPage: React.FC<TeamDashboardPageProps> = ({ onNavigate
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const pendingApprovals = purchaseProposals.filter((p) => p.status === 'PENDING_CEO_APPROVAL');
+  const pendingApprovals = purchaseProposals.filter(
+    (p) => p.status === 'PENDING_CEO_APPROVAL' && p.teamId === currentTeam.id
+  );
+  const teamInventory = inventory.filter((i) => i.teamId === currentTeam.id);
+  const teamLedger = ledger.filter((e) => e.teamId === currentTeam.id);
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 flex pb-16 md:pb-0 transition-colors">
@@ -245,7 +249,7 @@ export const TeamDashboardPage: React.FC<TeamDashboardPageProps> = ({ onNavigate
             </div>
             <div>
               <div className="text-lg sm:text-xl font-black text-stone-900 dark:text-stone-100 font-mono">
-                {inventory.length}
+                {teamInventory.length}
               </div>
               <div className="text-[11px] text-stone-500 font-medium">Items in Inventory</div>
             </div>
@@ -572,7 +576,7 @@ export const TeamDashboardPage: React.FC<TeamDashboardPageProps> = ({ onNavigate
           </div>
 
           <div className="space-y-3">
-            {ledger.slice(0, 4).map((entry) => (
+            {teamLedger.slice(0, 4).map((entry) => (
               <div
                 key={entry.id}
                 className="flex items-center justify-between p-3 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-100 dark:border-stone-800/80"

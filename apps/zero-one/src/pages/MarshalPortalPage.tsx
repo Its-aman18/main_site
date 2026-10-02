@@ -131,7 +131,7 @@ export const MarshalPortalPage: React.FC<MarshalPortalPageProps> = ({ onNavigate
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {teams.slice(0, 6).map((t) => (
+            {teams.map((t) => (
               <div
                 key={t.id}
                 className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 flex items-center justify-between"

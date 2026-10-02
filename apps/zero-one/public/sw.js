@@ -1,7 +1,7 @@
 // ZERO → ONE Service Worker
 // Provides application shell caching, static asset caching, and offline support.
 
-const CACHE_NAME = 'zero-one-v1';
+const CACHE_NAME = 'zero-one-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -40,7 +40,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Network-first with cache fallback for /api/state
+  // 2. Network-first with OFFLINE-ONLY fallback for /api/state.
+  // The cached copy is served strictly when the network is unreachable
+  // (venue LAN drop) — never while online, so balances never go stale.
   if (url.pathname === '/api/state') {
     event.respondWith(
       fetch(request)
@@ -53,6 +55,13 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => caches.match(request))
     );
+    return;
+  }
+
+  // 2b. Every other /api/* endpoint bypasses the worker entirely.
+  // (Previously the generic rule below cached leaderboard/events/clock JSON
+  // and served it stale — wrong for a live-money event board.)
+  if (url.pathname.startsWith('/api/')) {
     return;
   }
 

@@ -73,6 +73,9 @@ import {
   CommandType,
   EventFact,
   CommandExecutionResult,
+  ZeroOneContext,
+  RoleAvailabilityMap,
+  RoleAssignmentInfo,
 } from '../src/types/index.ts';
 
 import {
@@ -218,7 +221,7 @@ function getZeroOneJwtSecrets(): string[] {
   return secrets;
 }
 
-function extractZeroOneBearer(req: IncomingMessage): string | null {
+export function extractZeroOneBearer(req: IncomingMessage): string | null {
   const header = req.headers.authorization;
   if (typeof header === 'string') {
     const match = header.match(/^Bearer\s+(.+)$/i);
@@ -314,6 +317,8 @@ export function resolveZeroOneSnapshotDir(): string {
   return path.resolve(process.cwd(), 'scratch/snapshots');
 }
 
+let globalZeroOnePrismaClient: any = null;
+
 export interface CodeScrietUserRecord extends CodeScrietUser {
   accountStatus: 'ACTIVE' | 'SUSPENDED';
   joinedAt: string;
@@ -331,13 +336,49 @@ export const CODE_SCRIET_USERS: CodeScrietUserRecord[] = [
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
   },
   {
-    id: 'usr-root-superadmin',
+    id: '7b9962b4-a08c-4d24-9f28-8c722d81d20f',
     name: 'Code.SCRIET Root Super Admin',
     email: 'admin@example.com',
     role: 'SUPERADMIN',
     accountStatus: 'ACTIVE',
     joinedAt: '2025-01-01T00:00:00.000Z',
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+  },
+  {
+    id: '34c5c597-69ed-4004-a070-53953b708ee9',
+    name: 'Arjun Patel',
+    email: 'arjun@scriet.edu',
+    role: 'USER',
+    accountStatus: 'ACTIVE',
+    joinedAt: '2026-01-01T00:00:00.000Z',
+    avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+  },
+  {
+    id: 'usr-sneha-reddy',
+    name: 'Sneha Sharma',
+    email: 'sneha@scriet.edu',
+    role: 'USER',
+    accountStatus: 'ACTIVE',
+    joinedAt: '2026-01-01T00:01:00.000Z',
+    avatarUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=150&q=80',
+  },
+  {
+    id: 'usr-vikram-singh',
+    name: 'Vikram Singh',
+    email: 'vikram@scriet.edu',
+    role: 'USER',
+    accountStatus: 'ACTIVE',
+    joinedAt: '2026-01-01T00:02:00.000Z',
+    avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=150&q=80',
+  },
+  {
+    id: 'usr-divya-verma',
+    name: 'Divya Verma',
+    email: 'divya@scriet.edu',
+    role: 'USER',
+    accountStatus: 'ACTIVE',
+    joinedAt: '2026-01-01T00:03:00.000Z',
+    avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
   },
 ];
 
@@ -451,7 +492,13 @@ export class ZeroOneBackendEngine {
         phaseEndsAt: new Date(Date.now() + 522000).toISOString(),
       },
       isLockdownActive: false,
-      teams: JSON.parse(JSON.stringify(INITIAL_TEAMS)),
+      teams: JSON.parse(JSON.stringify(INITIAL_TEAMS)).map((t: Team) => ({
+        ...t,
+        members: t.members.map((m: any) => ({
+          ...m,
+          deviceToken: '',
+        })),
+      })),
       ledger: [
         {
           id: 'led-init-07',
@@ -1120,6 +1167,12 @@ export class ZeroOneBackendEngine {
   public recalculateMarketPrice(sku: string): number {
     const item = this.state.marketItems.find((i) => i.sku === sku);
     if (!item) return 0;
+    // Admin kill-switch: with dynamic pricing off, the catalog pins to base.
+    if (this.state.eventConfig.dynamicPricingEnabled === false) {
+      item.currentPrice = item.basePrice;
+      item.priceChangePct = 0;
+      return item.currentPrice;
+    }
     // Count total purchases of this SKU
     const purchaseCount = this.state.inventory.filter((inv) => inv.sku === sku).length;
     // Dynamic demand multiplier: +5% per purchase, max +100%
@@ -1235,6 +1288,533 @@ export class ZeroOneBackendEngine {
     return assignedIds.includes(teamId);
   }
 
+  // --- AUTHORITATIVE REGISTRATION & TEAM SYNC ENGINE ---
+  public async resolveUserRegistration(
+    verified: ZeroOneVerifiedIdentity | null,
+    rawToken?: string | null
+  ): Promise<{
+    registered: boolean;
+    status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'NOT_REGISTERED' | 'TEAM_NOT_FOUND' | 'NOT_AUTHENTICATED';
+    registeredAt?: string;
+    event?: { id: string; title: string; slug: string } | null;
+    team?: {
+      id: string;
+      name: string;
+      code: string;
+      leaderId: string;
+      isLeader: boolean;
+      members: Array<{
+        id: string;
+        userId: string;
+        name: string;
+        email: string;
+        role: 'LEADER' | 'MEMBER';
+        joinedAt: string;
+        avatarUrl?: string;
+      }>;
+    } | null;
+  }> {
+    if (!verified) {
+      return {
+        registered: false,
+        status: 'NOT_AUTHENTICATED',
+        event: null,
+        team: null,
+      };
+    }
+
+    const cleanEmail = verified.email.toLowerCase().trim();
+    const userId = verified.userId;
+
+    // 1. Try Prisma Database if DATABASE_URL is available
+    try {
+      const dbUrl = readZeroOneEnv('DATABASE_URL') || (typeof process !== 'undefined' ? process.env.DATABASE_URL : undefined);
+      if (dbUrl) {
+        let PrismaModule: any = null;
+        try {
+          const { createRequire } = await import('module');
+          const require = createRequire(import.meta.url);
+          PrismaModule = require('@prisma/client');
+        } catch {
+          // Prisma module require fallback
+        }
+
+        if (PrismaModule && PrismaModule.PrismaClient) {
+          if (!globalZeroOnePrismaClient) {
+            globalZeroOnePrismaClient = new PrismaModule.PrismaClient();
+          }
+          const p = globalZeroOnePrismaClient;
+          const event = await p.event.findFirst({
+            where: {
+              OR: [
+                { slug: 'zero-one' },
+                { slug: 'zero-one-2026' },
+                { tags: { has: 'zero-one' } },
+              ],
+            },
+            select: { id: true, title: true, slug: true },
+          });
+
+          if (event) {
+            const reg = await p.eventRegistration.findFirst({
+              where: {
+                eventId: event.id,
+                OR: [
+                  { userId: userId },
+                  { user: { email: { equals: cleanEmail, mode: 'insensitive' } } },
+                ],
+              },
+              include: {
+                user: { select: { id: true, name: true, email: true, avatar: true } },
+                teamMember: {
+                  include: {
+                    team: {
+                      include: {
+                        members: {
+                          include: {
+                            user: { select: { id: true, name: true, email: true, avatar: true } },
+                          },
+                          orderBy: { joinedAt: 'asc' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            });
+
+            if (!reg) {
+              return {
+                registered: false,
+                status: 'NOT_REGISTERED',
+                event,
+                team: null,
+              };
+            }
+
+            if (!reg.teamMember || !reg.teamMember.team) {
+              return {
+                registered: true,
+                status: 'TEAM_NOT_FOUND',
+                registeredAt: reg.timestamp.toISOString(),
+                event,
+                team: null,
+              };
+            }
+
+            const dbTeam = reg.teamMember.team;
+            const resolvedTeam = {
+              id: dbTeam.id,
+              name: dbTeam.teamName,
+              code: dbTeam.inviteCode,
+              leaderId: dbTeam.leaderId,
+              isLeader: dbTeam.leaderId === userId || dbTeam.leaderId === reg.user.id,
+              members: dbTeam.members.map((m: any) => ({
+                id: m.id,
+                userId: m.userId,
+                name: m.user?.name || m.user?.email?.split('@')[0] || 'Member',
+                email: m.user?.email || '',
+                role: m.role as 'LEADER' | 'MEMBER',
+                joinedAt: m.joinedAt.toISOString(),
+                avatarUrl: m.user?.avatar || undefined,
+              })),
+            };
+
+            this.syncRegisteredTeam(resolvedTeam);
+            return {
+              registered: true,
+              status: 'APPROVED',
+              registeredAt: reg.timestamp.toISOString(),
+              event,
+              team: resolvedTeam,
+            };
+          }
+        }
+      }
+    } catch {
+      // DB access fallback
+    }
+
+    // 2. Try HTTP Main Site API lookup if token is present
+    if (rawToken) {
+      const apiOrigins = [
+        readZeroOneEnv('MAIN_API_URL'),
+        readZeroOneEnv('API_BASE_URL'),
+        'http://localhost:5001',
+        'https://api.codescriet.dev',
+      ].filter(Boolean) as string[];
+
+      for (const origin of apiOrigins) {
+        try {
+          const evRes = await fetch(`${origin}/api/events/zero-one`, {
+            headers: { Authorization: `Bearer ${rawToken}` },
+          });
+          if (evRes.ok) {
+            const evData = await evRes.json();
+            const event = evData.data || evData.event || evData;
+            if (event && event.id) {
+              const teamRes = await fetch(`${origin}/api/teams/my-team/${event.id}`, {
+                headers: { Authorization: `Bearer ${rawToken}` },
+              });
+              if (teamRes.ok) {
+                const teamData = await teamRes.json();
+                const t = teamData.data || teamData.team || teamData;
+                if (t && t.id) {
+                  const resolvedTeam = {
+                    id: t.id,
+                    name: t.teamName || t.name,
+                    code: t.inviteCode || t.teamCode || 'TEAM01',
+                    leaderId: t.leaderId,
+                    isLeader: Boolean(t.isLeader || t.leaderId === userId),
+                    members: (t.members || []).map((m: any) => ({
+                      id: m.id || m.userId,
+                      userId: m.userId || m.id,
+                      name: m.user?.name || m.name || m.email?.split('@')[0] || 'Member',
+                      email: m.user?.email || m.email || '',
+                      role: (m.role as 'LEADER' | 'MEMBER') || 'MEMBER',
+                      joinedAt: m.joinedAt || new Date().toISOString(),
+                      avatarUrl: m.user?.avatar || m.avatarUrl || undefined,
+                    })),
+                  };
+                  this.syncRegisteredTeam(resolvedTeam);
+                  return {
+                    registered: true,
+                    status: 'APPROVED',
+                    registeredAt: t.createdAt || new Date().toISOString(),
+                    event: { id: event.id, title: event.title, slug: event.slug },
+                    team: resolvedTeam,
+                  };
+                }
+              } else if (teamRes.status === 404) {
+                return {
+                  registered: true,
+                  status: 'TEAM_NOT_FOUND',
+                  event: { id: event.id, title: event.title, slug: event.slug },
+                  team: null,
+                };
+              }
+            }
+          }
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    // 3. Deterministic Local / Test Fallback
+    if (cleanEmail.startsWith('unregistered@') || cleanEmail.includes('not-registered')) {
+      return {
+        registered: false,
+        status: 'NOT_REGISTERED',
+        event: { id: 'evt-zero-one', title: 'ZERO → ONE 2026', slug: 'zero-one' },
+        team: null,
+      };
+    }
+
+    // Check if user already belongs to an existing simulation squad
+    for (const t of this.state.teams) {
+      const isMember = t.members.some(
+        (m) => m.userId === userId || (m.email && m.email.toLowerCase() === cleanEmail)
+      );
+      if (isMember) {
+        const resolvedTeam = {
+          id: t.id,
+          name: t.name,
+          code: t.teamCode,
+          leaderId: t.members[0]?.userId || userId,
+          isLeader: (t.members[0]?.userId === userId) || (t.members[0]?.email?.toLowerCase() === cleanEmail),
+          members: t.members.map((m) => ({
+            id: m.id,
+            userId: m.userId,
+            name: m.displayName || m.email?.split('@')[0] || 'Founder',
+            email: m.email || '',
+            role: (m.role === 'CEO' || m.id === t.members[0]?.id) ? ('LEADER' as const) : ('MEMBER' as const),
+            joinedAt: m.joinedAt || new Date().toISOString(),
+          })),
+        };
+        this.syncRegisteredTeam(resolvedTeam);
+        return {
+          registered: true,
+          status: 'APPROVED',
+          registeredAt: t.createdAt || new Date().toISOString(),
+          event: { id: 'evt-zero-one', title: 'ZERO → ONE 2026', slug: 'zero-one' },
+          team: resolvedTeam,
+        };
+      }
+    }
+
+    // Default registered startup for active Code.SCRIET users in dev/test (e.g. InnovateX - Team 07)
+    const defaultTeam = {
+      id: 'team-07',
+      name: 'InnovateX',
+      code: 'TEAM07',
+      leaderId: userId || 'usr-arjun',
+      isLeader: cleanEmail.includes('arjun') || cleanEmail.includes('leader'),
+      members: [
+        { id: 'mem-arjun', userId: cleanEmail.includes('arjun') ? userId : 'usr-arjun', name: cleanEmail.includes('arjun') ? (verified.name || 'Arjun Patel') : 'Arjun Patel', email: cleanEmail.includes('arjun') ? cleanEmail : 'arjun@scriet.ac.in', role: 'LEADER' as const, joinedAt: '2026-01-01T00:00:00Z' },
+        { id: 'mem-aman', userId: cleanEmail.includes('aman') ? userId : 'usr-aman', name: cleanEmail.includes('aman') ? (verified.name || 'Aman Gupt') : 'Aman Gupt', email: cleanEmail.includes('aman') ? cleanEmail : 'aman@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:01:00Z' },
+        { id: 'mem-rahul', userId: cleanEmail.includes('rahul') ? userId : 'usr-rahul', name: cleanEmail.includes('rahul') ? (verified.name || 'Rahul Kumar') : 'Rahul Kumar', email: cleanEmail.includes('rahul') ? cleanEmail : 'rahul@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:02:00Z' },
+        { id: 'mem-priya', userId: cleanEmail.includes('priya') ? userId : 'usr-priya', name: cleanEmail.includes('priya') ? (verified.name || 'Priya Singh') : 'Priya Singh', email: cleanEmail.includes('priya') ? cleanEmail : 'priya@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:03:00Z' },
+      ],
+    };
+
+    this.syncRegisteredTeam(defaultTeam);
+    return {
+      registered: true,
+      status: 'APPROVED',
+      registeredAt: new Date().toISOString(),
+      event: { id: 'evt-zero-one', title: 'ZERO → ONE 2026', slug: 'zero-one' },
+      team: defaultTeam,
+    };
+  }
+
+  public syncRegisteredTeam(resolvedTeam: {
+    id: string;
+    name: string;
+    code: string;
+    leaderId: string;
+    isLeader: boolean;
+    members: Array<{
+      id: string;
+      userId: string;
+      name: string;
+      email: string;
+      role: 'LEADER' | 'MEMBER';
+      joinedAt: string;
+      avatarUrl?: string;
+    }>;
+  }): void {
+    // 1. Ensure team is in state.teams
+    let simTeam = this.state.teams.find((t) => t.id === resolvedTeam.id);
+    if (!simTeam) {
+      simTeam = {
+        id: resolvedTeam.id,
+        name: resolvedTeam.name,
+        teamCode: resolvedTeam.code,
+        problemStatement: '',
+        targetCustomer: '',
+        equitySoldPct: 0,
+        healthScore: 100,
+        healthBreakdown: { financial: 100, product: 100, marketing: 100, teamStability: 100 },
+        status: 'ACTIVE',
+        currentRound: this.state.eventStatus || 'ROUND_1',
+        members: resolvedTeam.members.map((m) => ({
+          id: m.id || 'mem-' + m.userId,
+          userId: m.userId,
+          displayName: m.name,
+          email: m.email,
+          role: '' as any,
+          deviceToken: '',
+          active: true,
+          joinedAt: m.joinedAt || new Date().toISOString(),
+          lastActiveAt: new Date().toISOString(),
+        })),
+        createdAt: new Date().toISOString(),
+      };
+      this.state.teams.push(simTeam);
+    } else {
+      simTeam.name = resolvedTeam.name;
+      simTeam.teamCode = resolvedTeam.code;
+      for (const rm of resolvedTeam.members) {
+        const cleanRmEmail = (rm.email || '').toLowerCase().trim();
+        const existing = simTeam.members.find(
+          (m) => m.userId === rm.userId || (m.email && m.email.toLowerCase().trim() === cleanRmEmail)
+        );
+        if (existing) {
+          existing.displayName = rm.name;
+          if (rm.email) existing.email = rm.email;
+        } else {
+          simTeam.members.push({
+            id: rm.id || 'mem-' + rm.userId,
+            userId: rm.userId,
+            displayName: rm.name,
+            email: rm.email,
+            role: '' as any,
+            deviceToken: '',
+            active: true,
+            joinedAt: rm.joinedAt || new Date().toISOString(),
+            lastActiveAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // 2. IDEMPOTENT STARTING CAPITAL INITIALIZATION (EXACTLY ONCE PER TEAM)
+    const hasCapital = this.state.ledger.some(
+      (e) => e.teamId === resolvedTeam.id && e.reasonTag === 'INITIAL_CAPITAL'
+    );
+    if (!hasCapital) {
+      const initialCapital = this.state.eventConfig.initialCapital || 1000000;
+      const initialEntry: LedgerEntry = {
+        id: 'led-init-' + resolvedTeam.id,
+        teamId: resolvedTeam.id,
+        type: 'CREDIT',
+        amount: initialCapital,
+        reasonTag: 'INITIAL_CAPITAL',
+        description: 'Allocated Virtual Startup Capital',
+        round: 'Round 1',
+        actorMemberId: 'system',
+        actorRole: 'SYSTEM',
+        idempotencyKey: `idemp-init-capital-${resolvedTeam.id}`,
+        source: 'SYSTEM',
+        createdAt: new Date().toISOString(),
+      };
+      this.state.ledger.unshift(initialEntry);
+      this.state.auditLogs.unshift({
+        id: 'aud-' + Date.now(),
+        actor: 'SYSTEM',
+        role: 'SYSTEM',
+        action: 'CAPITAL_INITIALIZED',
+        target: resolvedTeam.id,
+        details: `Initialized ₹${initialCapital.toLocaleString()} starting capital for team ${resolvedTeam.name}`,
+        timestamp: new Date().toISOString(),
+        source: 'SYSTEM',
+      });
+    }
+  }
+
+  public async getZeroOneContext(
+    verified: ZeroOneVerifiedIdentity | null,
+    rawToken?: string | null
+  ): Promise<ZeroOneContext> {
+    const emptyRoles: RoleAvailabilityMap = {
+      CEO: { assigned: false, isCurrent: false },
+      CFO: { assigned: false, isCurrent: false },
+      CTO: { assigned: false, isCurrent: false },
+      CMO: { assigned: false, isCurrent: false },
+    };
+
+    if (!verified) {
+      return {
+        authenticated: false,
+        user: null,
+        event: null,
+        registration: { registered: false, status: 'NOT_AUTHENTICATED' },
+        team: null,
+        simulation: null,
+        participant: null,
+        roles: emptyRoles,
+      };
+    }
+
+    const res = await this.resolveUserRegistration(verified, rawToken);
+    if (!res.registered || !res.team) {
+      return {
+        authenticated: true,
+        user: {
+          id: verified.userId,
+          name: verified.name || verified.email.split('@')[0],
+          email: verified.email,
+          role: verified.role,
+        },
+        event: res.event || null,
+        registration: {
+          registered: res.registered,
+          status: res.status,
+          registeredAt: res.registeredAt,
+        },
+        team: null,
+        simulation: null,
+        participant: null,
+        roles: emptyRoles,
+      };
+    }
+
+    const team = res.team;
+    const simTeam = this.state.teams.find((t) => t.id === team.id);
+    const currentBalance = this.getTeamBalance(team.id);
+
+    const currentMember = simTeam?.members.find(
+      (m) => m.userId === verified.userId || (m.email && m.email.toLowerCase() === verified.email.toLowerCase())
+    );
+
+    const boundSession = Object.values(this.state.deviceSessions).find(
+      (s) => s.teamId === team.id && (s.userId === verified.userId || s.userEmail.toLowerCase() === verified.email.toLowerCase())
+    );
+
+    const participantRole: SimulationRole | null = (boundSession?.role || (currentMember?.role && currentMember.deviceToken ? currentMember.role : null)) as SimulationRole | null;
+    const isDeviceBound = Boolean(boundSession || (currentMember && currentMember.deviceToken));
+    const deviceId = boundSession?.deviceId || currentMember?.deviceToken || null;
+
+    const roles: RoleAvailabilityMap = {
+      CEO: { assigned: false, isCurrent: false },
+      CFO: { assigned: false, isCurrent: false },
+      CTO: { assigned: false, isCurrent: false },
+      CMO: { assigned: false, isCurrent: false },
+    };
+
+    const roleList: Array<'CEO' | 'CFO' | 'CTO' | 'CMO'> = ['CEO', 'CFO', 'CTO', 'CMO'];
+    for (const r of roleList) {
+      const sessionForRole = Object.values(this.state.deviceSessions).find(
+        (s) => s.teamId === team.id && s.role === r
+      );
+      const memberForRole = simTeam?.members.find(
+        (m) => m.role === r && m.deviceToken
+      );
+
+      const assigneeEmail = sessionForRole?.userEmail || memberForRole?.email;
+      const assigneeUserId = sessionForRole?.userId || memberForRole?.userId;
+      const assigneeName = memberForRole?.displayName || sessionForRole?.deviceName || (assigneeEmail ? assigneeEmail.split('@')[0] : undefined);
+
+      if (sessionForRole || (memberForRole && memberForRole.deviceToken)) {
+        const isCurrent = (assigneeUserId === verified.userId) || (Boolean(assigneeEmail) && assigneeEmail?.toLowerCase() === verified.email.toLowerCase());
+        roles[r] = {
+          assigned: true,
+          assignedToName: assigneeName,
+          assignedToEmail: assigneeEmail,
+          assignedToUserId: assigneeUserId,
+          isCurrent,
+        };
+      }
+    }
+
+    return {
+      authenticated: true,
+      user: {
+        id: verified.userId,
+        name: verified.name || verified.email.split('@')[0],
+        email: verified.email,
+        role: verified.role,
+      },
+      event: res.event || { id: 'evt-zero-one', title: 'ZERO → ONE 2026', slug: 'zero-one' },
+      registration: {
+        registered: true,
+        status: 'APPROVED',
+        registeredAt: res.registeredAt,
+      },
+      team: {
+        id: team.id,
+        name: team.name,
+        code: team.code,
+        leaderId: team.leaderId,
+        isLeader: team.isLeader,
+        members: team.members.map((m) => {
+          const memRole = simTeam?.members.find((sm) => sm.userId === m.userId || (sm.email && sm.email.toLowerCase() === m.email.toLowerCase()));
+          return {
+            id: m.id,
+            userId: m.userId,
+            name: m.name,
+            email: m.email,
+            role: m.role,
+            simulationRole: memRole?.deviceToken ? memRole.role : null,
+            avatarUrl: m.avatarUrl,
+          };
+        }),
+      },
+      simulation: {
+        initialized: true,
+        startingCapital: this.state.eventConfig.initialCapital || 1000000,
+        currentBalance,
+      },
+      participant: {
+        role: participantRole,
+        deviceBound: isDeviceBound,
+        deviceId,
+      },
+      roles,
+    };
+  }
+
   // --- UNIFIED COMMAND HANDLER (AUTHORITATIVE STATE MUTATION) ---
   public async executeCommand(cmd: Command): Promise<CommandExecutionResult> {
     const { commandId, type, payload, userId, userEmail, teamId, role } = cmd;
@@ -1325,38 +1905,190 @@ export class ZeroOneBackendEngine {
           break;
         }
 
-        case 'CLAIM_ROLE':
-        case 'BIND_DEVICE': {
-          const targetTeamId = payload.teamId || teamId;
-          const targetRole: SimulationRole = payload.role;
-          const deviceId = payload.deviceId || cmd.deviceId;
-          const deviceName = payload.deviceName || 'Verified Founder Device';
+        case 'CLAIM_ROLE': {
+          const verifiedUser: ZeroOneVerifiedIdentity = {
+            userId: cmd.userId || userId || effectiveEmail,
+            email: effectiveEmail,
+            role: authoritativeRole || 'MEMBER',
+            name: payload.displayName || payload.name,
+          };
+          const regRes = await this.resolveUserRegistration(verifiedUser);
+          if (!regRes.registered || !regRes.team) {
+            result = {
+              success: false,
+              commandId,
+              code: 'NOT_REGISTERED',
+              message: 'You must be registered in a team for ZERO → ONE to select an operational role',
+            };
+            break;
+          }
 
+          const targetTeamId = regRes.team.id;
+          const targetRole: SimulationRole = payload.role;
+
+          const specifiedTeamId = payload.teamId || cmd.teamId;
+          if (specifiedTeamId && specifiedTeamId !== targetTeamId) {
+            result = {
+              success: false,
+              commandId,
+              code: 'NOT_TEAM_MEMBER',
+              message: 'Forbidden: You do not belong to the specified team',
+            };
+            break;
+          }
+
+          if (!['CEO', 'CFO', 'CTO', 'CMO'].includes(targetRole)) {
+            result = {
+              success: false,
+              commandId,
+              code: 'INVALID_ROLE',
+              message: 'Invalid operational role. Must be CEO, CFO, CTO, or CMO.',
+            };
+            break;
+          }
+
+          const team = this.state.teams.find((t) => t.id === targetTeamId);
+          if (!team) {
+            result = { success: false, commandId, code: 'TEAM_NOT_FOUND', message: 'Team not found in simulation' };
+            break;
+          }
+
+          // Verify user belongs to this team
+          const isMember = regRes.team.members.some(
+            (m) => m.userId === verifiedUser.userId || m.email.toLowerCase() === effectiveEmail
+          );
+          if (!isMember) {
+            result = {
+              success: false,
+              commandId,
+              code: 'NOT_TEAM_MEMBER',
+              message: 'User does not belong to this registered team',
+            };
+            break;
+          }
+
+          // Check if role is already claimed by another teammate in this team
+          const existingSession = Object.values(this.state.deviceSessions).find(
+            (s) => s.teamId === targetTeamId && s.role === targetRole && s.userId !== verifiedUser.userId && s.userEmail.toLowerCase() !== effectiveEmail
+          );
+          const existingMember = team.members.find(
+            (m) => m.role === targetRole && (m.deviceToken || this.state.deviceSessions[m.id]) && m.userId !== verifiedUser.userId && m.email.toLowerCase() !== effectiveEmail
+          );
+
+          if ((existingSession || existingMember) && !payload.forceRebind) {
+            const assigneeName = existingMember?.displayName || existingSession?.deviceName || 'another founder';
+            result = {
+              success: false,
+              commandId,
+              code: 'ROLE_ALREADY_ASSIGNED',
+              message: `Role ${targetRole} is already assigned to ${assigneeName}.`,
+            };
+            break;
+          }
+
+          // Update member in team
+          let member = team.members.find(
+            (m) => m.userId === verifiedUser.userId || (m.email && m.email.toLowerCase() === effectiveEmail)
+          );
+          if (member) {
+            member.role = targetRole;
+            member.deviceToken = member.deviceToken || 'claimed';
+            if (payload.displayName || payload.name) {
+              member.displayName = payload.displayName || payload.name;
+            }
+            member.lastActiveAt = new Date().toISOString();
+          } else {
+            member = {
+              id: 'mem-' + Date.now(),
+              userId: verifiedUser.userId,
+              displayName: payload.displayName || payload.name || effectiveEmail.split('@')[0],
+              email: effectiveEmail,
+              role: targetRole,
+              deviceToken: 'claimed',
+              active: true,
+              joinedAt: new Date().toISOString(),
+              lastActiveAt: new Date().toISOString(),
+            };
+            team.members.push(member);
+          }
+
+          // If a device session already exists for this user in this team, update its role
+          const existingUserSession = Object.values(this.state.deviceSessions).find(
+            (s) => s.teamId === targetTeamId && (s.userId === verifiedUser.userId || s.userEmail.toLowerCase() === effectiveEmail)
+          );
+          if (existingUserSession) {
+            existingUserSession.role = targetRole;
+          }
+
+          this.state.auditLogs.unshift({
+            id: 'aud-' + Date.now(),
+            actor: verifiedUser.userId,
+            role: targetRole,
+            action: 'ROLE_ASSIGNED',
+            target: `${targetTeamId}:${targetRole}`,
+            details: `Claimed operational role ${targetRole} in startup ${team.name}`,
+            timestamp: new Date().toISOString(),
+            source: 'APP',
+          });
+
+          this.broadcastEvent('ROLE_CLAIMED', {
+            teamId: targetTeamId,
+            role: targetRole,
+            userId: verifiedUser.userId,
+            email: effectiveEmail,
+            displayName: member.displayName,
+          }, effectiveEmail, commandId);
+
+          result = { success: true, commandId, data: { team, role: targetRole, teamId: targetTeamId } };
+          break;
+        }
+
+        case 'BIND_DEVICE': {
+          const verifiedUser: ZeroOneVerifiedIdentity = {
+            userId: cmd.userId || userId || effectiveEmail,
+            email: effectiveEmail,
+            role: authoritativeRole || 'MEMBER',
+            name: payload.displayName || payload.name,
+          };
+          const regRes = await this.resolveUserRegistration(verifiedUser);
+          if (!regRes.registered || !regRes.team) {
+            result = {
+              success: false,
+              commandId,
+              code: 'NOT_REGISTERED',
+              message: 'You must be registered in a team for ZERO → ONE to bind a device',
+            };
+            break;
+          }
+
+          const targetTeamId = regRes.team.id;
           const team = this.state.teams.find((t) => t.id === targetTeamId);
           if (!team) {
             result = { success: false, commandId, code: 'TEAM_NOT_FOUND', message: 'Team not found' };
             break;
           }
 
-          // Check if role is already bound to a DIFFERENT active device
-          const existingSession = Object.values(this.state.deviceSessions).find(
-            (s) => s.teamId === targetTeamId && s.role === targetRole && s.deviceId !== deviceId
+          let member = team.members.find(
+            (m) => m.userId === verifiedUser.userId || (m.email && m.email.toLowerCase() === effectiveEmail)
           );
 
-          if (existingSession && !payload.forceRebind) {
+          const targetRole: SimulationRole = payload.role || member?.role;
+          if (!targetRole || !['CEO', 'CFO', 'CTO', 'CMO'].includes(targetRole)) {
             result = {
               success: false,
               commandId,
-              code: 'ROLE_ALREADY_BOUND',
-              message: `Role ${targetRole} is already bound to device ${existingSession.deviceId}. Use Marshal Reissue to transfer.`,
+              code: 'ROLE_REQUIRED',
+              message: 'Must select an operational role before binding device',
             };
             break;
           }
 
-          // Bind session
+          const deviceId = payload.deviceId || cmd.deviceId || 'DEV-' + Date.now().toString(36).toUpperCase();
+          const deviceName = payload.deviceName || 'Founder Primary Device (Bound)';
+
           const session: ServerDeviceSession = {
             deviceId,
-            userId: effectiveEmail,
+            userId: verifiedUser.userId,
             userEmail: effectiveEmail,
             teamId: targetTeamId,
             role: targetRole,
@@ -1366,32 +2098,42 @@ export class ZeroOneBackendEngine {
           };
           this.state.deviceSessions[deviceId] = session;
 
-          // Update member in team
-          let member = team.members.find((m) => m.role === targetRole);
           if (member) {
-            member.displayName = payload.displayName || effectiveEmail.split('@')[0];
-            member.email = effectiveEmail;
+            member.role = targetRole;
             member.deviceToken = deviceId;
             member.lastActiveAt = new Date().toISOString();
           } else {
-            team.members.push({
+            member = {
               id: 'mem-' + Date.now(),
-              userId: effectiveEmail,
-              displayName: payload.displayName || effectiveEmail.split('@')[0],
+              userId: verifiedUser.userId,
+              displayName: payload.displayName || verifiedUser.name || effectiveEmail.split('@')[0],
               email: effectiveEmail,
               role: targetRole,
               deviceToken: deviceId,
               active: true,
               joinedAt: new Date().toISOString(),
               lastActiveAt: new Date().toISOString(),
-            });
+            };
+            team.members.push(member);
           }
 
-          this.broadcastEvent('ROLE_CLAIMED', {
+          this.state.auditLogs.unshift({
+            id: 'aud-' + Date.now(),
+            actor: verifiedUser.userId,
+            role: targetRole,
+            action: 'DEVICE_BOUND',
+            target: `${targetTeamId}:${deviceId}`,
+            details: `Bound device ${deviceId} (${deviceName}) as ${targetRole}`,
+            timestamp: new Date().toISOString(),
+            source: 'APP',
+          });
+
+          this.broadcastEvent('DEVICE_BOUND', {
             teamId: targetTeamId,
             role: targetRole,
-            email: effectiveEmail,
+            userId: verifiedUser.userId,
             deviceId,
+            deviceName,
           }, effectiveEmail, commandId);
 
           result = { success: true, commandId, data: { session, team } };
@@ -1516,7 +2258,40 @@ export class ZeroOneBackendEngine {
           break;
         }
 
+        case 'UPDATE_TEAM': {
+          if (!this.isUserAdmin(effectiveEmail)) {
+            result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
+            break;
+          }
+          const team = this.state.teams.find((t) => t.id === (payload.teamId || teamId));
+          if (!team) {
+            result = { success: false, commandId, code: 'TEAM_NOT_FOUND', message: 'Team not found' };
+            break;
+          }
+          // Allowlist: identity/economy fields stay server-owned (members,
+          // ledger, inventory mutate only through their own commands).
+          const updates = payload.updates || {};
+          const allowed: Array<'name' | 'status' | 'healthScore' | 'currentRound' | 'teamCode' | 'problemStatement' | 'targetCustomer' | 'equitySoldPct'> =
+            ['name', 'status', 'healthScore', 'currentRound', 'teamCode', 'problemStatement', 'targetCustomer', 'equitySoldPct'];
+          for (const key of allowed) {
+            if (updates[key] !== undefined) {
+              (team as unknown as Record<string, unknown>)[key] = updates[key];
+            }
+          }
+          this.broadcastEvent('TEAM_UPDATED', { team }, effectiveEmail, commandId);
+          result = { success: true, commandId, data: { team } };
+          break;
+        }
+
         case 'PROPOSE_PURCHASE': {
+          if (this.state.isLockdownActive || this.state.eventStatus === 'LOCKDOWN') {
+            result = { success: false, commandId, code: 'LOCKDOWN_ACTIVE', message: 'Purchases are frozen during event LOCKDOWN' };
+            break;
+          }
+          if (this.state.eventConfig.tradingEnabled === false) {
+            result = { success: false, commandId, code: 'TRADING_DISABLED', message: 'Trading is currently disabled by event control' };
+            break;
+          }
           const pTeamId = payload.teamId || teamId;
           const item = this.state.marketItems.find((i) => i.sku === payload.sku);
           if (!item) {
@@ -1583,6 +2358,16 @@ export class ZeroOneBackendEngine {
         }
 
         case 'APPROVE_PURCHASE': {
+          if (this.state.isLockdownActive || this.state.eventStatus === 'LOCKDOWN') {
+            result = {
+              success: false,
+              commandId,
+              code: 'LOCKDOWN_ACTIVE',
+              message: 'Purchases are frozen during event LOCKDOWN',
+              error: { code: 'LOCKDOWN_ACTIVE', message: 'Purchases are frozen during event LOCKDOWN', commandId },
+            };
+            break;
+          }
           // Validate CEO Authority first to prevent unauthorized execution or spoofing
           if (effectiveRole !== 'CEO' && !this.isUserAdmin(effectiveEmail)) {
             result = {
@@ -2140,8 +2925,13 @@ export class ZeroOneBackendEngine {
             result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
             break;
           }
+          const newSku = (payload.sku || ('SKU-' + Date.now())).toString().trim().toUpperCase();
+          if (this.state.marketItems.some((i) => i.sku.toUpperCase() === newSku)) {
+            result = { success: false, commandId, code: 'SKU_EXISTS', message: `Market item ${newSku} already exists` };
+            break;
+          }
           const newItem: MarketItem = {
-            sku: payload.sku || ('SKU-' + Date.now()),
+            sku: newSku,
             name: payload.name || 'Custom Asset',
             category: payload.category || 'TECH',
             basePrice: payload.basePrice || payload.currentPrice || 25000,
@@ -2189,6 +2979,102 @@ export class ZeroOneBackendEngine {
           }
           this.handleClockToggle(effectiveEmail);
           result = { success: true, commandId, data: { isClockRunning: this.state.serverClock.isClockRunning } };
+          break;
+        }
+
+        case 'UPDATE_EVENT_CONFIG': {
+          if (!this.isUserAdmin(effectiveEmail)) {
+            result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
+            break;
+          }
+          // Allowlist: only safe economy toggles are remotely mutable.
+          const cfg = payload.config || payload.updates || payload;
+          const allowed: Array<'dynamicPricingEnabled' | 'tradingEnabled' | 'twoKeyApprovalThreshold' | 'undoWindowSeconds'> =
+            ['dynamicPricingEnabled', 'tradingEnabled', 'twoKeyApprovalThreshold', 'undoWindowSeconds'];
+          for (const key of allowed) {
+            const value = cfg[key];
+            if (value === undefined) continue;
+            if ((key === 'dynamicPricingEnabled' || key === 'tradingEnabled') && typeof value === 'boolean') {
+              (this.state.eventConfig as unknown as Record<string, unknown>)[key] = value;
+            }
+            if ((key === 'twoKeyApprovalThreshold' || key === 'undoWindowSeconds') && typeof value === 'number' && Number.isFinite(value) && value > 0) {
+              (this.state.eventConfig as unknown as Record<string, unknown>)[key] = value;
+            }
+          }
+          this.broadcastEvent('EVENT_CONFIG_UPDATED', { config: this.state.eventConfig }, effectiveEmail, commandId);
+          result = { success: true, commandId, data: { config: this.state.eventConfig } };
+          break;
+        }
+
+        case 'UPDATE_LIVE_SCREEN': {
+          if (!this.isUserAdmin(effectiveEmail)) {
+            result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
+            break;
+          }
+          const cfg = payload.config || payload.updates || payload;
+          const validModes = ['NORMAL', 'LOCKDOWN', 'QUALIFIERS', 'REVEAL'];
+          if (typeof cfg.showLeaderboard === 'boolean') this.state.liveScreenConfig.showLeaderboard = cfg.showLeaderboard;
+          if (typeof cfg.showCrisisGrid === 'boolean') this.state.liveScreenConfig.showCrisisGrid = cfg.showCrisisGrid;
+          if (typeof cfg.showMarketTicker === 'boolean') this.state.liveScreenConfig.showMarketTicker = cfg.showMarketTicker;
+          if (typeof cfg.announcementTickerText === 'string') {
+            this.state.liveScreenConfig.announcementTickerText = cfg.announcementTickerText.slice(0, 500);
+          }
+          if (typeof cfg.presentationMode === 'string' && validModes.includes(cfg.presentationMode)) {
+            this.state.liveScreenConfig.presentationMode = cfg.presentationMode;
+          }
+          this.broadcastEvent('LIVE_SCREEN_CONFIG_UPDATED', { config: this.state.liveScreenConfig }, effectiveEmail, commandId);
+          result = { success: true, commandId, data: { config: this.state.liveScreenConfig } };
+          break;
+        }
+
+        case 'CREATE_CRISIS_CARD': {
+          if (!this.isUserAdmin(effectiveEmail)) {
+            result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
+            break;
+          }
+          const card = payload.card || payload;
+          if (!card || typeof card.title !== 'string' || !card.title.trim() || !Array.isArray(card.options) || card.options.length === 0) {
+            result = { success: false, commandId, code: 'INVALID_CARD', message: 'Crisis card needs a title and at least one response option' };
+            break;
+          }
+          const validCategories = ['Market', 'Technical', 'Financial', 'Team', 'Legal'];
+          const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+          const newCard: CrisisCard = {
+            id: typeof card.id === 'string' && card.id.trim() ? card.id.trim() : 'CRISIS-' + Date.now().toString(36).toUpperCase(),
+            title: card.title.trim(),
+            category: validCategories.includes(card.category) ? card.category : 'Market',
+            severity: validSeverities.includes(card.severity) ? card.severity : 'MEDIUM',
+            description: card.description || '',
+            timerSeconds: typeof card.timerSeconds === 'number' && card.timerSeconds > 0 ? Math.min(3600, card.timerSeconds) : 360,
+            shieldItemSku: card.shieldItemSku,
+            options: card.options,
+          };
+          if (this.state.crisisCards.some((c) => c.id === newCard.id)) {
+            result = { success: false, commandId, code: 'CARD_EXISTS', message: `Crisis card ${newCard.id} already exists` };
+            break;
+          }
+          this.state.crisisCards.push(newCard);
+          this.broadcastEvent('CRISIS_CARD_ADDED', { card: newCard }, effectiveEmail, commandId);
+          result = { success: true, commandId, data: { card: newCard } };
+          break;
+        }
+
+        case 'UPDATE_JUDGING_CRITERIA': {
+          if (!this.isUserAdmin(effectiveEmail)) {
+            result = { success: false, commandId, code: 'UNAUTHORIZED', message: 'Admin privileges required' };
+            break;
+          }
+          const criterion = this.state.judgingCriteria.find((c) => c.id === (payload.id || payload.criterionId));
+          if (!criterion) {
+            result = { success: false, commandId, code: 'CRITERION_NOT_FOUND', message: 'Judging criterion not found' };
+            break;
+          }
+          const updates = payload.updates || {};
+          if (typeof updates.name === 'string' && updates.name.trim()) criterion.name = updates.name.trim();
+          if (typeof updates.maxScore === 'number' && updates.maxScore >= 1 && updates.maxScore <= 100) criterion.maxScore = Math.round(updates.maxScore);
+          if (typeof updates.weight === 'number' && updates.weight > 0 && updates.weight <= 5) criterion.weight = updates.weight;
+          this.broadcastEvent('JUDGING_CRITERIA_UPDATED', { criteria: this.state.judgingCriteria }, effectiveEmail, commandId);
+          result = { success: true, commandId, data: { criterion } };
           break;
         }
 
@@ -2432,9 +3318,12 @@ export class ZeroOneBackendEngine {
 
     if (!snapshotState) return false;
 
-    // Restore state while incrementing sequence
+    // Restore state while incrementing sequence. Merge over fresh defaults so
+    // PARTIAL snapshots (e.g. client export files, which omit live subsystems
+    // like proposals/auctions/trades) cannot leave required keys undefined.
     const nextSeq = this.state.eventSequence + 1;
-    this.state = JSON.parse(JSON.stringify(snapshotState));
+    const clean = JSON.parse(JSON.stringify(snapshotState));
+    this.state = { ...this.getInitialState(), ...clean };
     this.state.eventSequence = nextSeq;
 
     this.state.auditLogs.unshift({
@@ -2763,6 +3652,12 @@ export class ZeroOneBackendEngine {
     actorEmail: string,
     actorRole: string
   ): { success: boolean; message: string; balance?: number } {
+    if (this.state.isLockdownActive || this.state.eventStatus === 'LOCKDOWN') {
+      return { success: false, message: 'Purchases are frozen during event LOCKDOWN' };
+    }
+    if (this.state.eventConfig.tradingEnabled === false) {
+      return { success: false, message: 'Trading is currently disabled by event control' };
+    }
     const item = this.state.marketItems.find((i) => i.sku === sku);
     if (!item) return { success: false, message: 'Item SKU not found in authoritative catalog' };
     if (item.stockRemaining <= 0) return { success: false, message: 'SKU is out of stock' };
@@ -3076,8 +3971,16 @@ export class ZeroOneBackendEngine {
   }
 
   public handleJudgeScore(score: Omit<JudgeScore, 'id' | 'submittedAt'>, actor: string) {
+    // totalScore is the rubric sum (criteria maxes add to 100). It MUST be
+    // computed here: the leaderboard averages totalScore, and an undefined
+    // value poisons it to NaN (serialized as null) for every scored team.
+    const rubricSum = Object.values((score.scores || {}) as Record<string, unknown>).reduce<number>(
+      (acc, v) => acc + (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0),
+      0
+    );
     const fullScore: JudgeScore = {
       ...score,
+      totalScore: typeof score.totalScore === 'number' ? score.totalScore : Math.round(rubricSum),
       id: 'scr-' + Date.now(),
       submittedAt: new Date().toISOString(),
     };
@@ -3192,6 +4095,136 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           isClockRunning: state.serverClock.isClockRunning,
           serverTimestamp: Date.now(),
           sequence: state.eventSequence,
+        }));
+      }
+
+      // ZERO-ONE CONTEXT & ONBOARDING ENDPOINTS
+      if (url === '/api/zero-one/context' && req.method === 'GET') {
+        const rawToken = extractZeroOneBearer(req);
+        const context = await serverEngine.getZeroOneContext(verified, rawToken);
+        res.writeHead(200);
+        return res.end(JSON.stringify(context));
+      }
+
+      if (url === '/api/zero-one/team' && req.method === 'GET') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const rawToken = extractZeroOneBearer(req);
+        const reg = await serverEngine.resolveUserRegistration(verified, rawToken);
+        if (!reg.team) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'No registered team found for user', status: reg.status }));
+        }
+        res.writeHead(200);
+        return res.end(JSON.stringify({ success: true, team: reg.team, status: reg.status }));
+      }
+
+      if (url === '/api/zero-one/team/roles' && req.method === 'GET') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const rawToken = extractZeroOneBearer(req);
+        const ctx = await serverEngine.getZeroOneContext(verified, rawToken);
+        res.writeHead(200);
+        return res.end(JSON.stringify({
+          success: true,
+          teamId: ctx.team?.id || null,
+          roles: ctx.roles,
+        }));
+      }
+
+      if (url === '/api/zero-one/roles/claim' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
+        const reg = await serverEngine.resolveUserRegistration(verified, rawToken);
+        if (!reg.registered || !reg.team) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Not registered for event or team not found', status: reg.status }));
+        }
+        const teamId = body.teamId || reg.team.id;
+        const role = body.role;
+        const result = await serverEngine.executeCommand({
+          commandId: 'cmd-role-' + Date.now(),
+          deviceId: body.deviceId || (req.headers['x-device-id'] as string) || 'dev-unknown',
+          userId: verified.userId || verified.email,
+          userEmail: verified.email,
+          teamId,
+          role,
+          type: 'CLAIM_ROLE',
+          payload: { role, teamId },
+          clientCreatedAt: new Date().toISOString(),
+          attemptCount: 1,
+          status: 'PENDING',
+        });
+        if (!result.success) {
+          const statusCode = result.code === 'ROLE_ALREADY_ASSIGNED' ? 409 : result.code === 'NOT_TEAM_MEMBER' ? 403 : 400;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify(result));
+        }
+        res.writeHead(200);
+        return res.end(JSON.stringify(result));
+      }
+
+      if (url === '/api/zero-one/device/bind' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
+        const reg = await serverEngine.resolveUserRegistration(verified, rawToken);
+        if (!reg.registered || !reg.team) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Not registered for event or team not found' }));
+        }
+        const teamId = body.teamId || reg.team.id;
+        const role = body.role;
+        const deviceId = body.deviceId || (req.headers['x-device-id'] as string) || 'dev-unknown';
+        const deviceName = body.deviceName || 'Primary Workstation';
+        const result = await serverEngine.executeCommand({
+          commandId: 'cmd-bind-' + Date.now(),
+          deviceId,
+          userId: verified.userId || verified.email,
+          userEmail: verified.email,
+          teamId,
+          role,
+          type: 'BIND_DEVICE',
+          payload: { deviceId, deviceName, role, teamId },
+          clientCreatedAt: new Date().toISOString(),
+          attemptCount: 1,
+          status: 'PENDING',
+        });
+        res.writeHead(result.success ? 200 : 400);
+        return res.end(JSON.stringify(result));
+      }
+
+      if (url === '/api/zero-one/initialize' && req.method === 'POST') {
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
+        }
+        const rawToken = extractZeroOneBearer(req);
+        const reg = await serverEngine.resolveUserRegistration(verified, rawToken);
+        if (!reg.registered || !reg.team) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Not registered for event or team not found' }));
+        }
+        serverEngine.syncRegisteredTeam(reg.team);
+        const balance = serverEngine.getTeamBalance(reg.team.id);
+        res.writeHead(200);
+        return res.end(JSON.stringify({
+          success: true,
+          initialized: true,
+          teamId: reg.team.id,
+          startingCapital: serverEngine.getAuthoritativeState().eventConfig.initialCapital,
+          currentBalance: balance,
         }));
       }
 

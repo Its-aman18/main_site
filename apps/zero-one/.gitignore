@@ -14,6 +14,9 @@ dist-ssr
 # Never commit real secrets — copy .env.example to .env instead.
 .env
 
+# Runtime event data (snapshots, localyti state) — never commit.
+scratch/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -32,12 +32,12 @@ async function run() {
   const indexRes = await get('/');
   assert(indexRes.statusCode === 200 && indexRes.body.includes('id="root"'), 'Landing Page HTML (/)', `(Status: ${indexRes.statusCode}, bytes: ${indexRes.body.length})`);
   assert(indexRes.body.includes('manifest.webmanifest'), 'PWA Webmanifest link present in index.html');
-  assert(indexRes.body.includes('/src/main.tsx'), 'Vite React Entrypoint (/src/main.tsx) present in index.html');
+  assert(indexRes.body.includes('/src/main.tsx') || /\/assets\/[^"']+\.js/.test(indexRes.body), 'React Entrypoint present in index.html (dev /src/main.tsx or prod /assets bundle)');
 
   // 2. Admin Page
   const adminRes = await get('/admin.html');
   assert(adminRes.statusCode === 200 && adminRes.body.includes('id="admin-root"'), 'Admin HTML (/admin.html)', `(Status: ${adminRes.statusCode}, bytes: ${adminRes.body.length})`);
-  assert(adminRes.body.includes('/src/adminMain.tsx'), 'Admin Entrypoint (/src/adminMain.tsx) present in admin.html');
+  assert(adminRes.body.includes('/src/adminMain.tsx') || /\/assets\/[^"']+\.js/.test(adminRes.body), 'Admin Entrypoint present in admin.html (dev /src/adminMain.tsx or prod /assets bundle)');
 
   // 3. PWA Manifest
   const manifestRes = await get('/manifest.webmanifest');

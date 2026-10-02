@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSimulation } from '../services/simulationContext';
 import {
   Play,
@@ -72,6 +72,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     toggleClock,
     resetClock,
     triggerLockdown,
+    revealResults,
     teams,
     updateTeam,
     reissueRoleToDevice,
@@ -90,6 +91,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     extendCrisisTimer,
     resolveCrisisManually,
     canvas,
+    canvasStore,
     updateCanvasField,
     artifacts,
     submitArtifact,
@@ -181,6 +183,22 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const [newItemPrice, setNewItemPrice] = useState<number>(25000);
   const [newItemStock, setNewItemStock] = useState<number>(10);
 
+  // Auction desk (open form)
+  const [showOpenAuction, setShowOpenAuction] = useState<boolean>(false);
+  const [newAucTitle, setNewAucTitle] = useState<string>('');
+  const [newAucDesc, setNewAucDesc] = useState<string>('');
+  const [newAucSku, setNewAucSku] = useState<string>('');
+  const [newAucMinBid, setNewAucMinBid] = useState<number>(100000);
+  const [newAucMinutes, setNewAucMinutes] = useState<number>(10);
+
+  // Crisis card authoring
+  const [showAddCrisis, setShowAddCrisis] = useState<boolean>(false);
+  const [newCrisisTitle, setNewCrisisTitle] = useState<string>('');
+  const [newCrisisDesc, setNewCrisisDesc] = useState<string>('');
+  const [newCrisisCategory, setNewCrisisCategory] = useState<string>('Market');
+  const [newCrisisSeverity, setNewCrisisSeverity] = useState<string>('HIGH');
+  const [newCrisisTimer, setNewCrisisTimer] = useState<number>(360);
+
   const [restoreJsonInput, setRestoreJsonInput] = useState<string>('');
   const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
 
@@ -189,6 +207,16 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   // Announcements & Live Screen States
   const [newAnnType, setNewAnnType] = useState<Announcement['type']>('ALERT');
   const [liveTickerInput, setLiveTickerInput] = useState<string>(liveScreenConfig?.announcementTickerText || '');
+  // Resync the ticker draft when the config changes elsewhere (e.g. another
+  // operator's console), without clobbering in-progress typing.
+  const lastTickerSync = useRef<string>(liveScreenConfig?.announcementTickerText || '');
+  useEffect(() => {
+    const current = liveScreenConfig?.announcementTickerText || '';
+    if (current !== lastTickerSync.current) {
+      lastTickerSync.current = current;
+      setLiveTickerInput(current);
+    }
+  }, [liveScreenConfig?.announcementTickerText]);
 
   // Canvas View States
   const [selectedCanvasTeamId, setSelectedCanvasTeamId] = useState<string>(teams[0]?.id || 'team-07');
@@ -309,6 +337,13 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   };
 
   const handleStateAdvance = (next: EventStatus) => {
+    // REVEAL goes through the authoritative reveal (leaderboard broadcast),
+    // not just the status label.
+    if (next === 'REVEAL') {
+      revealResults();
+      showToast('Results revealed room-wide with final leaderboard!');
+      return;
+    }
     setEventStatus(next);
     showToast(`Event status updated to: ${next}`);
   };
@@ -353,7 +388,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleAnnouncementSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAnnTitle) return;
-    addAnnouncement(newAnnTitle, newAnnContent, 'ALERT');
+    addAnnouncement(newAnnTitle, newAnnContent, newAnnType);
     setNewAnnTitle('');
     setNewAnnContent('');
     showToast('Announcement broadcasted room-wide!');
@@ -384,6 +419,30 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
       l.actor.toLowerCase().includes(auditSearch.toLowerCase()) ||
       l.target.toLowerCase().includes(auditSearch.toLowerCase())
   );
+
+  // Canvas shown in the CANVAS tab: the selected squad's replica when synced,
+  // the live global canvas when it belongs to that squad, else an empty
+  // placeholder (previously the switcher only renamed the export file).
+  const shownCanvas: StartupCanvas =
+    canvasStore[selectedCanvasTeamId] ||
+    (canvas.teamId === selectedCanvasTeamId
+      ? canvas
+      : {
+          teamId: selectedCanvasTeamId,
+          problem: '',
+          customer: '',
+          solution: '',
+          usp: '',
+          revenueModel: '',
+          costStructure: '',
+          marketingStrategy: '',
+          competitors: '',
+          traction: '',
+          businessAssumptions: '',
+          lastSavedAt: '',
+          lastSavedBy: '',
+          version: 0,
+        });
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 flex transition-colors">
@@ -1228,6 +1287,11 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   onSubmit={(e) => {
                     e.preventDefault();
                     if (!newItemSku.trim() || !newItemName.trim()) return;
+                    const sku = newItemSku.trim().toUpperCase();
+                    if (marketItems.some((i) => i.sku.toUpperCase() === sku)) {
+                      showToast(`SKU ${sku} already exists — pick a unique code.`);
+                      return;
+                    }
                     addMarketItem({
                       sku: newItemSku.trim().toUpperCase(),
                       name: newItemName.trim(),
@@ -1352,7 +1416,11 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                                 const val = prompt(`Set exact stock for ${item.name} (Current: ${item.stockRemaining}):`, item.stockRemaining.toString());
                                 if (val !== null) {
                                   const ns = Math.max(0, parseInt(val) || 0);
-                                  updateMarketItem(item.sku, { stockRemaining: ns, stockTotal: Math.max(ns, item.stockTotal) });
+                                  // Server-authoritative: exact set = delta from
+                                  // current remaining (ADJUST_STOCK). stockTotal
+                                  // is display capacity, kept in sync locally.
+                                  adjustStock(item.sku, ns - item.stockRemaining);
+                                  updateMarketItem(item.sku, { stockTotal: Math.max(ns, item.stockTotal) });
                                   showToast(`Updated ${item.name} stock to ${ns}`);
                                 }
                               }}
@@ -1459,6 +1527,107 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
               </div>
             </div>
 
+            {/* Author a new crisis card (synced server-side, dispatchable immediately) */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-heading font-black text-sm text-stone-900 dark:text-stone-100">
+                  Author New Crisis Card
+                </h4>
+                <button
+                  onClick={() => setShowAddCrisis((v) => !v)}
+                  className="btn-secondary py-1.5 px-4 text-xs font-bold"
+                >
+                  {showAddCrisis ? 'Cancel' : '+ New Card'}
+                </button>
+              </div>
+              {showAddCrisis && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    value={newCrisisTitle}
+                    onChange={(e) => setNewCrisisTitle(e.target.value)}
+                    placeholder="Card title (e.g. Server Outage at Demo Hour)"
+                    className="input-text sm:col-span-2"
+                  />
+                  <input
+                    value={newCrisisDesc}
+                    onChange={(e) => setNewCrisisDesc(e.target.value)}
+                    placeholder="Situation description"
+                    className="input-text sm:col-span-2"
+                  />
+                  <select
+                    value={newCrisisCategory}
+                    onChange={(e) => setNewCrisisCategory(e.target.value)}
+                    className="input-text"
+                  >
+                    {['Market', 'Technical', 'Financial', 'Team', 'Legal'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={newCrisisSeverity}
+                    onChange={(e) => setNewCrisisSeverity(e.target.value)}
+                    className="input-text"
+                  >
+                    {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-stone-500 font-bold">Timer (sec)</span>
+                    <input
+                      type="number"
+                      value={newCrisisTimer}
+                      onChange={(e) => setNewCrisisTimer(Math.max(30, Math.min(3600, parseInt(e.target.value) || 360)))}
+                      className="input-text font-mono"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!newCrisisTitle.trim()) {
+                        showToast('Give the crisis card a title first.');
+                        return;
+                      }
+                      addCrisisCard({
+                        id: 'CRISIS-' + Date.now().toString(36).toUpperCase(),
+                        title: newCrisisTitle.trim(),
+                        category: newCrisisCategory as CrisisCard['category'],
+                        severity: newCrisisSeverity as CrisisCard['severity'],
+                        description: newCrisisDesc.trim() || 'Operator-authored shock event.',
+                        timerSeconds: newCrisisTimer,
+                        options: [
+                          {
+                            id: 'OPT-A',
+                            label: 'Spend to Contain',
+                            cost: 50000,
+                            description: 'Deploy reserves immediately to contain fallout.',
+                            effectDescription: 'Stabilizes the situation at a known cost.',
+                            healthDelta: 5,
+                            requiresRoles: ['CEO', 'CFO'],
+                          },
+                          {
+                            id: 'OPT-B',
+                            label: 'Ride It Out',
+                            cost: 0,
+                            description: 'Preserve capital and absorb the impact.',
+                            effectDescription: 'No spend, minor health impact.',
+                            healthDelta: -3,
+                            requiresRoles: ['CEO', 'CFO', 'CTO', 'CMO'],
+                          },
+                        ],
+                      });
+                      setShowAddCrisis(false);
+                      setNewCrisisTitle('');
+                      setNewCrisisDesc('');
+                      showToast('Crisis card authored and synced — dispatch it above!');
+                    }}
+                    className="btn-primary py-2 px-4 text-xs font-bold sm:col-span-2"
+                  >
+                    Save & Sync Card
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Active Crisis Monitor */}
             {activeCrisis && (
               <div className="card p-6 space-y-3 border-2 border-red-500/30">
@@ -1509,6 +1678,72 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
               <p className="text-xs text-stone-500">
                 Teams submit private sealed bids. The highest bid atomically wins and is debited upon closing.
               </p>
+
+              {!activeAuction && (
+                <div className="space-y-3">
+                  <button
+                    onClick={() => setShowOpenAuction((v) => !v)}
+                    className="btn-secondary py-2 px-4 text-xs font-bold"
+                  >
+                    {showOpenAuction ? 'Cancel' : '+ Open New Auction'}
+                  </button>
+                  {showOpenAuction && (
+                    <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        value={newAucTitle}
+                        onChange={(e) => setNewAucTitle(e.target.value)}
+                        placeholder="Auction title (e.g. Prime Keynote Slot)"
+                        className="input-text sm:col-span-2"
+                      />
+                      <input
+                        value={newAucDesc}
+                        onChange={(e) => setNewAucDesc(e.target.value)}
+                        placeholder="Description"
+                        className="input-text sm:col-span-2"
+                      />
+                      <input
+                        value={newAucSku}
+                        onChange={(e) => setNewAucSku(e.target.value)}
+                        placeholder="Item SKU (optional)"
+                        className="input-text font-mono"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={newAucMinBid}
+                          onChange={(e) => setNewAucMinBid(Math.max(0, parseInt(e.target.value) || 0))}
+                          placeholder="Min bid ₹"
+                          className="input-text font-mono"
+                        />
+                        <input
+                          type="number"
+                          value={newAucMinutes}
+                          onChange={(e) => setNewAucMinutes(Math.max(1, Math.min(120, parseInt(e.target.value) || 10)))}
+                          placeholder="Mins"
+                          className="input-text font-mono"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!newAucTitle.trim()) {
+                            showToast('Give the auction a title first.');
+                            return;
+                          }
+                          openAuction(newAucTitle.trim(), newAucDesc.trim() || 'Sealed-bid asset auction', newAucSku.trim() || 'AUCTION-ASSET', newAucMinBid, newAucMinutes);
+                          setShowOpenAuction(false);
+                          setNewAucTitle('');
+                          setNewAucDesc('');
+                          setNewAucSku('');
+                          showToast(`Auction "${newAucTitle.trim()}" is now OPEN room-wide!`);
+                        }}
+                        className="btn-primary py-2 px-4 text-xs font-bold sm:col-span-2"
+                      >
+                        Launch Auction
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {activeAuction ? (
                 <div className="p-4 rounded-2xl bg-stone-100 dark:bg-stone-900 space-y-3">
@@ -1592,10 +1827,10 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   </div>
                   <button
                     onClick={() => {
-                      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(canvas, null, 2));
+                      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(shownCanvas, null, 2));
                       const a = document.createElement('a');
                       a.setAttribute('href', dataStr);
-                      a.setAttribute('download', `canvas-${selectedCanvasTeamId}-v${canvas.version || 1}.json`);
+                      a.setAttribute('download', `canvas-${selectedCanvasTeamId}-v${shownCanvas.version || 1}.json`);
                       document.body.appendChild(a);
                       a.click();
                       a.remove();
@@ -1614,15 +1849,15 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 <div className="flex items-center gap-2 font-mono">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-stone-700 dark:text-stone-300">
-                    Active Version: <strong className="text-orange-600">v{canvas.version || 1}</strong>
+                    Active Version: <strong className="text-orange-600">v{shownCanvas.version || 1}</strong>
                   </span>
                   <span className="text-stone-400">•</span>
                   <span className="text-stone-500">
-                    Last Saved: {canvas.lastSavedAt ? new Date(canvas.lastSavedAt).toLocaleTimeString() : 'Initial'}
+                    Last Saved: {shownCanvas.lastSavedAt ? new Date(canvas.lastSavedAt).toLocaleTimeString() : 'Initial'}
                   </span>
                 </div>
                 <div className="text-[11px] text-stone-500 font-mono">
-                  Sign-off Author: <span className="text-stone-700 dark:text-stone-300 font-bold">{canvas.lastSavedBy || 'Team CEO'}</span>
+                  Sign-off Author: <span className="text-stone-700 dark:text-stone-300 font-bold">{shownCanvas.lastSavedBy || 'Team CEO'}</span>
                 </div>
               </div>
             </div>
@@ -1638,7 +1873,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <AlertTriangle className="w-4 h-4 text-red-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.problem || 'No problem statement submitted yet.'}
+                  {shownCanvas.problem || 'No problem statement submitted yet.'}
                 </p>
               </div>
 
@@ -1651,7 +1886,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <Users className="w-4 h-4 text-blue-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.customer || 'No customer profile specified yet.'}
+                  {shownCanvas.customer || 'No customer profile specified yet.'}
                 </p>
               </div>
 
@@ -1664,7 +1899,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <CheckCircle className="w-4 h-4 text-emerald-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.solution || 'No solution architecture documented.'}
+                  {shownCanvas.solution || 'No solution architecture documented.'}
                 </p>
               </div>
 
@@ -1677,7 +1912,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <Sparkles className="w-4 h-4 text-amber-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.usp || 'No unique value proposition defined.'}
+                  {shownCanvas.usp || 'No unique value proposition defined.'}
                 </p>
               </div>
 
@@ -1690,7 +1925,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <DollarSign className="w-4 h-4 text-green-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.revenueModel || 'No monetisation mechanics specified.'}
+                  {shownCanvas.revenueModel || 'No monetisation mechanics specified.'}
                 </p>
               </div>
 
@@ -1703,7 +1938,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <Sliders className="w-4 h-4 text-rose-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.costStructure || 'No breakdown of operational expenses.'}
+                  {shownCanvas.costStructure || 'No breakdown of operational expenses.'}
                 </p>
               </div>
 
@@ -1716,7 +1951,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <TrendingUp className="w-4 h-4 text-purple-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.marketingStrategy || 'No go-to-market channels listed.'}
+                  {shownCanvas.marketingStrategy || 'No go-to-market channels listed.'}
                 </p>
               </div>
 
@@ -1729,7 +1964,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <ShieldAlert className="w-4 h-4 text-cyan-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.competitors || 'No competitive analysis provided.'}
+                  {shownCanvas.competitors || 'No competitive analysis provided.'}
                 </p>
               </div>
 
@@ -1742,7 +1977,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <FileCheck className="w-4 h-4 text-teal-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans min-h-[60px]">
-                  {canvas.traction || 'No validation metrics documented yet.'}
+                  {shownCanvas.traction || 'No validation metrics documented yet.'}
                 </p>
               </div>
 
@@ -1755,7 +1990,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <Lock className="w-4 h-4 text-orange-500/60" />
                 </div>
                 <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-sans">
-                  {canvas.businessAssumptions || 'No risk assumptions registered.'}
+                  {shownCanvas.businessAssumptions || 'No risk assumptions registered.'}
                 </p>
               </div>
             </div>
@@ -2029,12 +2264,84 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {judgingCriteria.map((crit) => (
-                  <div key={crit.id} className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs">
-                    <span className="font-bold text-stone-800 dark:text-stone-200">{crit.name}</span>
-                    <span className="font-mono font-bold text-orange-600">Max: {crit.maxScore} pts</span>
+                  <div key={crit.id} className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-100 dark:border-stone-800 space-y-2 text-xs">
+                    <div className="font-bold text-stone-800 dark:text-stone-200">{crit.name}</div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 text-stone-500 font-semibold">
+                        Max
+                        <input
+                          type="number"
+                          value={crit.maxScore}
+                          min={1}
+                          max={100}
+                          onChange={(e) => {
+                            const v = Math.max(1, Math.min(100, parseInt(e.target.value) || crit.maxScore));
+                            updateJudgingCriterion(crit.id, { maxScore: v });
+                          }}
+                          className="input-text font-mono w-20 py-1"
+                        />
+                        pts
+                      </label>
+                      <label className="flex items-center gap-1.5 text-stone-500 font-semibold">
+                        Weight ×
+                        <input
+                          type="number"
+                          value={crit.weight}
+                          min={0.1}
+                          max={5}
+                          step={0.1}
+                          onChange={(e) => {
+                            const v = Math.max(0.1, Math.min(5, parseFloat(e.target.value) || crit.weight));
+                            updateJudgingCriterion(crit.id, { weight: Math.round(v * 10) / 10 });
+                          }}
+                          className="input-text font-mono w-20 py-1"
+                        />
+                      </label>
+                    </div>
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Automated floor scores (server-calculated, read-only proof) */}
+            <div className="card p-6 space-y-3">
+              <h4 className="font-heading font-extrabold text-sm">
+                Automated Floor Scores ({floorScores.length} squads)
+              </h4>
+              {floorScores.length === 0 ? (
+                <div className="text-xs text-stone-400">No floor scores yet — hit “Recalculate Automated Floor Scores” above.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-stone-200 dark:border-stone-800 text-stone-500 uppercase">
+                        <th className="py-2 px-3">Squad</th>
+                        <th className="py-2 px-3 text-right">Solvency</th>
+                        <th className="py-2 px-3 text-right">Reserve</th>
+                        <th className="py-2 px-3 text-right">Spread</th>
+                        <th className="py-2 px-3 text-right">Response</th>
+                        <th className="py-2 px-3 text-right">Tradeoff</th>
+                        <th className="py-2 px-3 text-right">Consistency</th>
+                        <th className="py-2 px-3 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 dark:divide-stone-800 font-mono">
+                      {floorScores.map((f) => (
+                        <tr key={f.teamId}>
+                          <td className="py-2 px-3 font-bold font-sans">{teams.find((t) => t.id === f.teamId)?.name || f.teamId}</td>
+                          <td className="py-2 px-3 text-right">{f.solvency}</td>
+                          <td className="py-2 px-3 text-right">{f.reserveBand}</td>
+                          <td className="py-2 px-3 text-right">{f.allocationSpread}</td>
+                          <td className="py-2 px-3 text-right">{f.responseTimeliness}</td>
+                          <td className="py-2 px-3 text-right">{f.tradeoffNamed}</td>
+                          <td className="py-2 px-3 text-right">{f.decisionConsistency}</td>
+                          <td className="py-2 px-3 text-right font-black text-orange-600">{f.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Submitted Judge Scores Table */}
@@ -2083,7 +2390,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 </div>
                 <div className="flex items-center gap-3">
                   <a
-                    href="/live.html"
+                    href="/#live-screen"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-primary py-2 px-4 text-xs flex items-center gap-1.5 font-bold"
@@ -2478,7 +2785,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
         {/* ========================================================================= */}
         {activeTab === 'ADMIN_VERIFICATION' && (
           <div className="space-y-6 animate-in fade-in duration-150">
-            {!isSuperAdmin() && !isAdminVerified() ? (
+            {!isSuperAdmin() ? (
               <div className="card p-8 text-center space-y-4 border-amber-500/30">
                 <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
                   <ShieldAlert className="w-8 h-8" />

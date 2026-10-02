@@ -1,6 +1,42 @@
 const http = require('http');
+const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
+
+// Resolve the REAL shared secret so tests exercise the verified-JWT path
+// (bare x-user-email headers are rejected since the login-system hardening).
+// Precedence: env JWT_SECRET > apps/zero-one/.env > repo root .env > dev fallback.
+function resolveTestSecret() {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim()) return process.env.JWT_SECRET.trim();
+  for (const candidate of [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), 'apps', 'zero-one', '.env'),
+    path.join(__dirname, '.env'),
+  ]) {
+    try {
+      const m = fs.readFileSync(candidate, 'utf8').match(/^JWT_SECRET=(.*)$/m);
+      if (m && m[1].trim()) return m[1].trim();
+    } catch { /* try next */ }
+  }
+  return 'dev_local_jwt_secret_change_me_before_production';
+}
+const TEST_SECRET = resolveTestSecret();
+
+function makeTestToken(email = 'aman@scriet.edu', role = 'MEMBER') {
+  return jwt.sign(
+    { userId: 'usr-test', id: 'usr-test', email, name: email.split('@')[0], role },
+    TEST_SECRET,
+    { algorithm: 'HS256', expiresIn: '7d' }
+  );
+}
 
 function request(options, postData) {
+  // Auto-attach a correctly-signed JWT derived from the call's x-user-email
+  // header (explicit Authorization wins). Keeps every call site unchanged
+  // while testing the real authenticated path end to end.
+  const email = options.headers?.['x-user-email'] || 'aman@scriet.edu';
+  const role = options.headers?.['x-user-role'] || 'MEMBER';
+  const bearer = options.headers?.Authorization || `Bearer ${makeTestToken(email, role)}`;
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -9,6 +45,7 @@ function request(options, postData) {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          Authorization: bearer,
           ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {}),
           ...options.headers,
         },

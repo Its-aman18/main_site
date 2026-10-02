@@ -1,7 +1,23 @@
 const http = require('http');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
 
-const TEST_SECRET = process.env.JWT_SECRET || 'dev_local_jwt_secret_change_me_before_production';
+function resolveTestSecret() {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim()) return process.env.JWT_SECRET.trim();
+  for (const candidate of [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), 'apps', 'zero-one', '.env'),
+    path.join(__dirname, '.env'),
+  ]) {
+    try {
+      const m = fs.readFileSync(candidate, 'utf8').match(/^JWT_SECRET=(.*)$/m);
+      if (m && m[1].trim()) return m[1].trim();
+    } catch { /* try next */ }
+  }
+  return 'dev_local_jwt_secret_change_me_before_production';
+}
+const TEST_SECRET = resolveTestSecret();
 
 function makeTestToken(email = 'aman@scriet.edu', role = 'MEMBER', userId = 'usr-test-founder') {
   return jwt.sign(
@@ -25,7 +41,7 @@ function request(options, postData) {
     const req = http.request(
       {
         hostname: 'localhost',
-        port: parseInt(process.env.ZERO_ONE_TEST_PORT || process.env.ZERO_ONE_PORT || process.env.PORT || '5175', 10),
+        port: parseInt(process.env.ZERO_ONE_TEST_PORT || process.env.ZERO_ONE_PORT || process.env.PORT || '5003', 10),
         ...options,
         headers: {
           'Content-Type': 'application/json',
