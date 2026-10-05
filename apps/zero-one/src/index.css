@@ -127,6 +127,96 @@ html, body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* ZERO -> ONE mission-control surfaces. Kept local to the standalone event app. */
+.zo-game-shell {
+  --zo-bg: #f6f1e8;
+  --zo-surface: #fffdf8;
+  --zo-ink: #211b16;
+  --zo-muted: #887d70;
+  --zo-line: #ded3c4;
+  --zo-orange: #e96521;
+  --zo-orange-soft: #fbe5d4;
+  background-color: var(--zo-bg);
+}
+
+.zo-game-shell .card {
+  border-color: var(--zo-line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(86, 58, 32, 0.06);
+}
+
+.zo-game-main {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background-image: linear-gradient(rgba(222, 211, 196, .24) 1px, transparent 1px), linear-gradient(90deg, rgba(222, 211, 196, .24) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+.zo-hud {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1.2fr .8fr 1.6fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  color: #fffaf2;
+  background: #211b16;
+  border: 1px solid #403329;
+  border-radius: 12px;
+  box-shadow: 0 16px 32px rgba(42, 27, 16, .16);
+}
+
+.zo-hud__brand, .zo-hud__mission, .zo-hud__stats { display: flex; align-items: center; gap: .7rem; }
+.zo-hud__brand { flex-direction: column; align-items: flex-start; gap: .15rem; }
+.zo-hud__brand strong { font: 800 1.15rem/1 'Sora', sans-serif; letter-spacing: .05em; }
+.zo-hud__brand em { color: var(--zo-orange); font-style: normal; }
+.zo-hud__mission { flex-direction: column; align-items: flex-start; border-left: 1px solid #554438; padding-left: 1rem; }
+.zo-hud__mission span, .zo-eyebrow { color: #ddad7e; font: 700 .62rem/1.2 'JetBrains Mono', monospace; letter-spacing: .16em; }
+.zo-hud__mission strong { font-size: .9rem; letter-spacing: .08em; }
+.zo-hud__stats { min-width: 0; justify-content: flex-end; gap: 1.2rem; font: 700 .78rem 'JetBrains Mono', monospace; }
+.zo-hud__stats span { display: flex; flex-direction: column; gap: .2rem; text-align: right; }
+.zo-hud__stats small { color: #9d8d7e; font-size: .58rem; letter-spacing: .1em; }
+
+.zo-section-kicker { display: flex; align-items: center; gap: .65rem; color: #9b8976; font: 700 .62rem 'JetBrains Mono', monospace; letter-spacing: .13em; }
+.zo-kicker-line { height: 1px; flex: 1; background: var(--zo-line); }
+.zo-mission-map { padding: 1rem 0 .25rem; }
+.zo-mission-track { display: flex; align-items: flex-start; margin-top: 1rem; }
+.zo-mission-node { display: flex; flex: 1; min-width: 0; gap: .55rem; color: #a09588; }
+.zo-mission-node__dot { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 1px solid #cfc2b2; border-radius: 50%; background: #eee6da; }
+.zo-mission-node__copy { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.zo-mission-node__id { font: 700 .58rem 'JetBrains Mono', monospace; }
+.zo-mission-node strong { color: #605448; font: 800 .72rem 'Sora', sans-serif; letter-spacing: .06em; }
+.zo-mission-node small { font-size: .63rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zo-mission-node.is-active { color: var(--zo-orange); }
+.zo-mission-node.is-active .zo-mission-node__dot { color: white; background: var(--zo-orange); border-color: var(--zo-orange); box-shadow: 0 0 0 5px rgba(233, 101, 33, .12); }
+.zo-mission-node.is-active strong { color: #b64b17; }
+.zo-mission-node.is-complete { color: #42856c; }
+.zo-mission-node.is-complete .zo-mission-node__dot { color: white; background: #42856c; border-color: #42856c; }
+.zo-mission-node.is-complete strong { color: #39705c; }
+.zo-mission-connector { height: 1px; flex: 0 1 52px; margin: 14px .5rem 0; background: #d6c9b9; }
+.zo-mission-connector.is-complete { background: #6ca48d; }
+.zo-mission-map--compact .zo-mission-track { margin-top: .65rem; }
+.zo-mission-map--compact .zo-mission-node__copy { display: none; }
+.zo-mission-map--compact .zo-mission-node { justify-content: center; }
+.zo-mission-intro { display: flex; justify-content: space-between; align-items: end; gap: 1rem; padding: .85rem 0 .25rem; }
+.zo-mission-intro h2 { margin-top: .45rem; font-size: clamp(1.35rem, 2vw, 2rem); }
+.zo-mission-intro p { max-width: 42rem; margin-top: .35rem; color: #756a5f; font-size: .82rem; }
+.zo-status-chip { flex: 0 0 auto; display: flex; align-items: center; gap: .45rem; padding: .55rem .7rem; border: 1px solid #b8d9c9; border-radius: 999px; color: #39705c; background: #eff8f2; font: 700 .62rem 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.zo-status-chip i { width: 6px; height: 6px; border-radius: 50%; background: #42856c; box-shadow: 0 0 0 3px #d8efdf; }
+.zo-landing-kicker { margin: .75rem 0 -.5rem; color: #b64b17; font: 700 .64rem 'JetBrains Mono', monospace; letter-spacing: .16em; }
+
+@media (max-width: 700px) {
+  .zo-hud { grid-template-columns: 1fr auto; }
+  .zo-hud__mission { order: 3; grid-column: 1 / -1; border-left: 0; border-top: 1px solid #554438; padding: .7rem 0 0; width: 100%; }
+  .zo-hud__stats { gap: .65rem; }
+  .zo-hud__stats span:nth-child(1) { display: none; }
+  .zo-mission-track { overflow-x: auto; padding-bottom: .4rem; }
+  .zo-mission-node { min-width: 116px; }
+  .zo-mission-connector { min-width: 24px; margin-left: .25rem; margin-right: .25rem; }
+  .zo-mission-intro { align-items: flex-start; flex-direction: column; }
+}
+
 /* Texture Pattern Background */
 .bg-grid-texture {
   background-image: radial-gradient(var(--grid-pattern-color) 1px, transparent 1px);

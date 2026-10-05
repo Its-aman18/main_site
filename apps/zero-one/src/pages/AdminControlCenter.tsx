@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSimulation } from '../services/simulationContext';
 import {
   Play,
@@ -24,10 +24,12 @@ import {
   Bell,
   FileCheck,
   CheckCircle,
+  CheckCircle2,
   FileText,
   DollarSign,
   Radio,
   Lock,
+  Unlock,
   Plus,
   Trash2,
   Edit,
@@ -38,6 +40,14 @@ import {
   ChevronRight,
   Smartphone,
   Sparkles,
+  Zap,
+  FastForward,
+  Rewind,
+  Send,
+  Volume2,
+  Eye,
+  Activity,
+  X,
 } from 'lucide-react';
 import {
   EventStatus,
@@ -49,6 +59,7 @@ import {
   Announcement,
   ArtifactSubmission,
   StartupCanvas,
+  Team,
 } from '../types';
 import { BOOTSTRAP_ADMIN_EMAIL } from '../services/adminAuthService';
 
@@ -71,13 +82,17 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     isClockRunning,
     toggleClock,
     resetClock,
+    extendClock,
+    isLockdownActive,
     triggerLockdown,
+    releaseLockdown,
     revealResults,
     teams,
     updateTeam,
     reissueRoleToDevice,
     ledger,
     getBalance,
+    getFinancialHealthBand,
     manualLedgerAdjustment,
     grantLoan,
     marketItems,
@@ -231,10 +246,219 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const [newArtUrl, setNewArtUrl] = useState<string>('');
   const [newArtDesc, setNewArtDesc] = useState<string>('');
 
+  // Real-time Event Commander States
+  const [flashModalOpen, setFlashModalOpen] = useState(false);
+  const [flashTitle, setFlashTitle] = useState('');
+  const [flashContent, setFlashContent] = useState('');
+  const [flashType, setFlashType] = useState<Announcement['type']>('ALERT');
+  const [flashSyncProjector, setFlashSyncProjector] = useState(true);
+
+  // Quick Floor Actions & Modals
+  const [quickAdjModalSquad, setQuickAdjModalSquad] = useState<Team | null>(null);
+  const [quickAdjType, setQuickAdjType] = useState<'CREDIT' | 'DEBIT'>('CREDIT');
+  const [quickAdjAmount, setQuickAdjAmount] = useState<number>(25000);
+  const [quickAdjReason, setQuickAdjReason] = useState<string>('Marshal Floor Award');
+
+  // Quick Squad Inspection Modal
+  const [inspectSquad, setInspectSquad] = useState<Team | null>(null);
+
+  // Real-Time Activity Stream Filter
+  const [activityFilter, setActivityFilter] = useState<'ALL' | 'FINANCE' | 'CRISIS' | 'STAGE'>('ALL');
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  const EVENT_STAGES: {
+    status: EventStatus;
+    label: string;
+    round: string;
+    recommendedMinutes: number;
+    description: string;
+    marketOpen: boolean;
+    tradingOpen: boolean;
+  }[] = useMemo(() => [
+    { status: 'SETUP', label: 'Setup', round: 'Pre-Event', recommendedMinutes: 15, description: 'Hardware, projector & backend sanity checks', marketOpen: false, tradingOpen: false },
+    { status: 'LOBBY', label: 'Lobby', round: 'Pre-Event', recommendedMinutes: 15, description: 'Squad arrival, team roster & seating arrangement', marketOpen: false, tradingOpen: false },
+    { status: 'ONBOARDING', label: 'Onboarding', round: 'Pre-Event', recommendedMinutes: 15, description: 'Device token binding & 4-role identity check', marketOpen: false, tradingOpen: false },
+    { status: 'BRIEF', label: 'Briefing', round: 'Pre-Event', recommendedMinutes: 20, description: 'Simulation rulebook, scoring rubric & key milestones', marketOpen: false, tradingOpen: false },
+    { status: 'ROUND_1', label: 'Round 1', round: 'Round 1', recommendedMinutes: 25, description: '₹10L Seed Capital, Lean Canvas v1 & Market Store unlocked', marketOpen: true, tradingOpen: false },
+    { status: 'MARKET_SHOCK', label: 'Market Shock', round: 'Round 1', recommendedMinutes: 10, description: 'Dynamic inflation wave! Asset prices fluctuate +20%', marketOpen: true, tradingOpen: false },
+    { status: 'ROUND_2', label: 'Round 2', round: 'Round 2', recommendedMinutes: 25, description: 'Product execution, operational crises & MVP demo link', marketOpen: true, tradingOpen: true },
+    { status: 'FIRESIDE', label: 'Fireside', round: 'Round 2', recommendedMinutes: 15, description: 'CEO live stage challenge & jury Q&A', marketOpen: false, tradingOpen: false },
+    { status: 'AUCTION', label: 'Auction', round: 'Round 2', recommendedMinutes: 15, description: 'Live exclusive asset bidding desk & equity trades', marketOpen: false, tradingOpen: true },
+    { status: 'ROUND_3', label: 'Round 3', round: 'Round 3', recommendedMinutes: 25, description: 'Final growth sprint, traction metrics & pitch submission', marketOpen: true, tradingOpen: true },
+    { status: 'LOCKDOWN', label: 'Lockdown', round: 'Freeze', recommendedMinutes: 5, description: 'Official books closed. Financial ledger & market frozen', marketOpen: false, tradingOpen: false },
+    { status: 'QUALIFIERS', label: 'Qualifiers', round: 'Judging', recommendedMinutes: 20, description: 'Floor evaluations by roaming marshals & judges', marketOpen: false, tradingOpen: false },
+    { status: 'DELIBERATION', label: 'Deliberation', round: 'Judging', recommendedMinutes: 15, description: 'Jury committee final score synthesis & locking', marketOpen: false, tradingOpen: false },
+    { status: 'FINALS', label: 'Finals', round: 'Showcase', recommendedMinutes: 20, description: 'Top 3 startup finalists stage presentations', marketOpen: false, tradingOpen: false },
+    { status: 'REVEAL', label: 'Grand Reveal', round: 'Closing', recommendedMinutes: 15, description: 'Live projector leaderboard reveal & awards ceremony', marketOpen: false, tradingOpen: false },
+    { status: 'ARCHIVED', label: 'Archived', round: 'Post-Event', recommendedMinutes: 0, description: 'Event concluded & historical audit archive saved', marketOpen: false, tradingOpen: false },
+  ], []);
+
+  const currentStageIndex = EVENT_STAGES.findIndex((s) => s.status === eventStatus);
+  const currentStage = EVENT_STAGES[currentStageIndex] || EVENT_STAGES[0];
+  const nextStage = currentStageIndex >= 0 && currentStageIndex < EVENT_STAGES.length - 1 ? EVENT_STAGES[currentStageIndex + 1] : null;
+  const prevStage = currentStageIndex > 0 ? EVENT_STAGES[currentStageIndex - 1] : null;
+
+  const handleAdvanceToNext = () => {
+    if (nextStage) {
+      handleStateAdvance(nextStage.status);
+      if (nextStage.recommendedMinutes > 0) {
+        resetClock(nextStage.recommendedMinutes);
+        showToast(`Advanced to ${nextStage.label} (Clock set to ${nextStage.recommendedMinutes}m)`);
+      } else {
+        showToast(`Advanced to ${nextStage.label}`);
+      }
+    }
+  };
+
+  const handleAdvanceToPrev = () => {
+    if (prevStage) {
+      handleStateAdvance(prevStage.status);
+      showToast(`Reverted state to ${prevStage.label}`);
+    }
+  };
+
+  const handleSendFlashBroadcast = (title: string, content: string, type: Announcement['type'] = 'ALERT') => {
+    if (!title.trim() || !content.trim()) return;
+    addAnnouncement(title.trim(), content.trim(), type);
+    if (flashSyncProjector) {
+      updateLiveScreenConfig({ announcementTickerText: `${title.trim()}: ${content.trim()}` });
+    }
+    showToast('Broadcast sent to all participant screens and live projector!');
+    setFlashModalOpen(false);
+    setFlashTitle('');
+    setFlashContent('');
+  };
+
+  const handleTriggerMarketShockPhase = () => {
+    handleStateAdvance('MARKET_SHOCK');
+    resetClock(10);
+    addAnnouncement(
+      '⚡ MARKET SHOCK COMMENCED',
+      'Emergency supply chain disruption! Raw material and cloud infrastructure prices have increased by 20%.',
+      'CRISIS'
+    );
+    updateLiveScreenConfig({ announcementTickerText: '⚡ MARKET SHOCK ACTIVE: Key asset prices surging by 20%!' });
+    showToast('Market Shock phase triggered room-wide!');
+  };
+
+  const handleLaunchAuctionDesk = () => {
+    handleStateAdvance('AUCTION');
+    resetClock(15);
+    addAnnouncement(
+      '🔨 AUCTION DESK OPEN',
+      'High-stakes exclusive asset bidding and peer-to-peer equity trading is now open.',
+      'INFO'
+    );
+    updateLiveScreenConfig({ presentationMode: 'AUCTION' as any });
+    showToast('Auction phase launched on all participant screens!');
+  };
+
+  const handleDeployMassCrises = () => {
+    let count = 0;
+    teams.forEach((t, idx) => {
+      if (!t.activeCrisisId) {
+        const cardToUse = crisisCards[idx % crisisCards.length] || crisisCards[0];
+        if (cardToUse) {
+          dispatchCrisisToTeam(t.id, cardToUse.id);
+          count++;
+        }
+      }
+    });
+    addAnnouncement(
+      '🚨 SECTOR CRISIS WAVE DISPATCHED',
+      'Severe operational anomalies detected across all startup verticals! CEOs and CFOs must act immediately.',
+      'CRISIS'
+    );
+    showToast(`Mass crises deployed across ${count} squads!`);
+  };
+
+  const handleQuickGrant = (team: Team, amount = 25000) => {
+    manualLedgerAdjustment(team.id, 'CREDIT', amount, 'Organizer Milestone Grant');
+    showToast(`Credited ₹${amount.toLocaleString('en-IN')} to ${team.name}`);
+  };
+
+  const handleQuickLoan = (team: Team, amount = 50000) => {
+    grantLoan(team.id, amount, 10);
+    showToast(`Disbursed ₹${amount.toLocaleString('en-IN')} emergency loan to ${team.name}`);
+  };
+
+  const handleQuickPenalty = (team: Team, amount = 10000) => {
+    manualLedgerAdjustment(team.id, 'DEBIT', amount, 'Rule Infraction / Floor Delay Penalty');
+    showToast(`Deducted ₹${amount.toLocaleString('en-IN')} penalty from ${team.name}`);
+  };
+
+  const handleResolveSquadCrisis = (team: Team) => {
+    resolveCrisisManually(team.id, 'Floor Marshal Direct Resolution');
+    showToast(`Crisis resolved for ${team.name}`);
+  };
+
+  const handleInjectSquadCrisis = (team: Team) => {
+    const card = crisisCards[0] || { id: 'crisis-ddos' };
+    dispatchCrisisToTeam(team.id, card.id);
+    showToast(`Crisis injected into ${team.name}`);
+  };
+
+  const handleQuickAdjustmentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickAdjModalSquad) return;
+    manualLedgerAdjustment(quickAdjModalSquad.id, quickAdjType, quickAdjAmount, quickAdjReason);
+    showToast(`${quickAdjType === 'CREDIT' ? 'Credited' : 'Debited'} ₹${quickAdjAmount.toLocaleString('en-IN')} to ${quickAdjModalSquad.name}`);
+    setQuickAdjModalSquad(null);
+  };
+
+  const recentActivities = useMemo(() => {
+    const list: {
+      id: string;
+      time: string;
+      title: string;
+      desc: string;
+      badge: string;
+      badgeColor: string;
+      category: 'FINANCE' | 'CRISIS' | 'STAGE' | 'ALL';
+    }[] = [];
+
+    ledger.slice(0, 20).forEach((led) => {
+      const team = teams.find((t) => t.id === led.teamId);
+      list.push({
+        id: 'led-' + led.id,
+        time: led.createdAt,
+        title: `${led.type === 'CREDIT' ? '+' : '-'}₹${led.amount.toLocaleString('en-IN')} • ${team?.name || led.teamId}`,
+        desc: led.description || led.reasonTag,
+        badge: led.type === 'CREDIT' ? 'CREDIT' : 'DEBIT',
+        badgeColor: led.type === 'CREDIT' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-red-500/10 text-red-600 border-red-500/20',
+        category: 'FINANCE',
+      });
+    });
+
+    auditLogs.slice(0, 20).forEach((aud) => {
+      const isCrisis = aud.action.includes('CRISIS');
+      const isStage = aud.action.includes('EVENT') || aud.action.includes('CLOCK') || aud.action.includes('LOCKDOWN');
+      list.push({
+        id: 'aud-' + aud.id,
+        time: aud.timestamp,
+        title: `${aud.action} • ${aud.target}`,
+        desc: aud.details,
+        badge: aud.role || 'SYSTEM',
+        badgeColor: isCrisis
+          ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+          : isStage
+          ? 'bg-orange-500/10 text-orange-600 border-orange-500/20'
+          : 'bg-stone-500/10 text-stone-600 dark:text-stone-300 border-stone-500/20',
+        category: isCrisis ? 'CRISIS' : isStage ? 'STAGE' : 'ALL',
+      });
+    });
+
+    return list.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 20);
+  }, [ledger, auditLogs, teams]);
+
+  const filteredActivities = useMemo(() => {
+    if (activityFilter === 'ALL') return recentActivities;
+    return recentActivities.filter((a) => a.category === activityFilter);
+  }, [recentActivities, activityFilter]);
 
   const handleSearchUser = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -650,208 +874,673 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
       {/* Main Admin Workspace Area */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
-        {/* Title Header matching Screenshot 7 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-black font-heading tracking-tight text-stone-900 dark:text-stone-100">
-                ZERO → ONE Control Center
-              </h1>
-              <span className="badge badge-orange text-[10px]">Real-time Engine</span>
+        {/* Real-time Live Event Commander Master Header */}
+        <div className="space-y-4 pb-4 border-b border-stone-200 dark:border-stone-800">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl sm:text-3xl font-black font-heading tracking-tight text-stone-900 dark:text-stone-100">
+                  ZERO → ONE Control Center
+                </h1>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Real-time SSE Active</span>
+                </div>
+                {isLockdownActive && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-red-600 dark:text-red-400 text-[11px] font-mono font-bold animate-pulse">
+                    <Lock className="w-3 h-3" />
+                    <span>ROOM LOCKDOWN ACTIVE</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-stone-500 mt-1">
+                Authoritative Master Event Operations • Real-time floor control & state synchronization
+              </p>
             </div>
-            <p className="text-xs text-stone-500 mt-1">
-              Authoritative Master Event Operations • Code.SCRIET Central Ecosystem
-            </p>
+
+            {/* Real-time Live Action Bar */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Stage Navigator & Advance */}
+              <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-1 text-xs">
+                <button
+                  onClick={handleAdvanceToPrev}
+                  disabled={!prevStage}
+                  title={prevStage ? `Revert to ${prevStage.label}` : 'No previous stage'}
+                  className="p-1.5 rounded-xl hover:bg-stone-200 dark:hover:bg-stone-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                >
+                  <Rewind className="w-3.5 h-3.5" />
+                </button>
+                <div className="px-2.5 py-1 font-mono font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                  <span>{currentStage.label}</span>
+                </div>
+                <button
+                  onClick={handleAdvanceToNext}
+                  disabled={!nextStage}
+                  title={nextStage ? `Advance to ${nextStage.label}` : 'Final stage reached'}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all shadow-sm disabled:opacity-40"
+                >
+                  <span className="text-[11px]">Next</span>
+                  <FastForward className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* Master Authoritative Clock Controller */}
+              <div className="flex items-center gap-1.5 bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-1">
+                <div
+                  className={`px-3 py-1 rounded-xl font-mono font-black text-sm tracking-wider flex items-center gap-1.5 ${
+                    serverTimeRemainingSeconds <= 120
+                      ? 'bg-red-500/20 text-red-600 animate-pulse'
+                      : isClockRunning
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>
+                    {Math.floor(serverTimeRemainingSeconds / 60)}:
+                    {(serverTimeRemainingSeconds % 60).toString().padStart(2, '0')}
+                  </span>
+                </div>
+
+                <button
+                  onClick={toggleClock}
+                  title={isClockRunning ? 'Pause official clock' : 'Start official clock'}
+                  className={`p-1.5 rounded-xl transition-colors ${
+                    isClockRunning
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                  }`}
+                >
+                  {isClockRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+                </button>
+
+                {/* Quick Extension Chips */}
+                <div className="hidden sm:flex items-center gap-1 pl-1 border-l border-stone-200 dark:border-stone-800 text-[10px] font-mono font-bold">
+                  <button
+                    onClick={() => {
+                      extendClock(120);
+                      showToast('Extended clock by +2 minutes');
+                    }}
+                    title="Add 2 minutes to official clock"
+                    className="px-1.5 py-1 rounded-lg bg-stone-200 dark:bg-stone-800 hover:bg-orange-500 hover:text-white transition-colors"
+                  >
+                    +2m
+                  </button>
+                  <button
+                    onClick={() => {
+                      extendClock(300);
+                      showToast('Extended clock by +5 minutes');
+                    }}
+                    title="Add 5 minutes to official clock"
+                    className="px-1.5 py-1 rounded-lg bg-stone-200 dark:bg-stone-800 hover:bg-orange-500 hover:text-white transition-colors"
+                  >
+                    +5m
+                  </button>
+                </div>
+              </div>
+
+              {/* Room Lockdown Emergency Button */}
+              {isLockdownActive ? (
+                <button
+                  onClick={releaseLockdown}
+                  title="Release room lockdown and unfreeze all screens"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-md animate-bounce"
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Release Freeze</span>
+                </button>
+              ) : (
+                <button
+                  onClick={triggerLockdown}
+                  title="Trigger 60s room lockdown / freeze all transactions"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white font-bold text-xs transition-colors"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Lockdown</span>
+                </button>
+              )}
+
+              {/* Flash Broadcast Alert Button */}
+              <button
+                onClick={() => setFlashModalOpen(true)}
+                title="Broadcast real-time announcement to all participants and projector"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-sm transition-all"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>Broadcast</span>
+              </button>
+
+              {/* Projector Live Screen Link */}
+              <button
+                onClick={() => onNavigate('live-screen')}
+                title="Open Projector Live Screen display"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 hover:border-stone-400 text-stone-700 dark:text-stone-300 font-bold text-xs transition-colors"
+              >
+                <Tv className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Projector</span>
+              </button>
+            </div>
           </div>
 
-          {/* Official Clock and Action Bar */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs font-mono font-bold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>State: {eventStatus}</span>
+          {/* Real-time Horizontal Visual Phase Stepper */}
+          <div className="pt-2">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-thin">
+              {EVENT_STAGES.map((st, idx) => {
+                const isCurrent = eventStatus === st.status;
+                const isPast = currentStageIndex > idx;
+                return (
+                  <button
+                    key={st.status}
+                    onClick={() => handleStateAdvance(st.status)}
+                    title={`${st.label}: ${st.description}`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 ${
+                      isCurrent
+                        ? 'bg-orange-500 text-white shadow-md ring-2 ring-orange-500/40 scale-105'
+                        : isPast
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
+                        : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800 border border-transparent'
+                    }`}
+                  >
+                    {isPast ? (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                    ) : (
+                      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
+                    )}
+                    <span>{st.label}</span>
+                  </button>
+                );
+              })}
             </div>
-
-            <div className="px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-600 font-mono font-bold text-xs">
-              {Math.floor(serverTimeRemainingSeconds / 60)}:{(serverTimeRemainingSeconds % 60).toString().padStart(2, '0')}
-            </div>
-
-            <button
-              onClick={toggleClock}
-              title={isClockRunning ? 'Pause official clock' : 'Resume official clock'}
-              className={`p-2 rounded-full border ${
-                isClockRunning ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-              }`}
-            >
-              {isClockRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            </button>
           </div>
         </div>
 
         {/* ========================================================================= */}
-        {/* TAB: OVERVIEW (Tiles matching Screenshot 7) */}
+        {/* TAB: OVERVIEW (Real-time Live Event Situation Room & Command Grid) */}
         {/* ========================================================================= */}
         {activeTab === 'OVERVIEW' && (
           <div className="space-y-6">
-            {/* 6 Large Control Center Tiles matching Screenshot 7 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Tile 1: Event Control */}
-              <div
-                onClick={() => setActiveTab('EVENT_CONTROL')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <Play className="w-6 h-6 fill-current" />
+            {/* Real-Time Live Situation Room Telemetry KPIs */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Active Phase</span>
+                <div className="text-sm font-black font-heading text-stone-900 dark:text-stone-100 truncate">
+                  {currentStage.label}
                 </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Event Control
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Manage event state & rounds
-                </p>
+                <div className="text-[10px] text-stone-500 truncate">{currentStage.round}</div>
               </div>
 
-              {/* Tile 2: Teams & Roles */}
-              <div
-                onClick={() => setActiveTab('TEAMS')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <Users className="w-6 h-6" />
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Official Clock</span>
+                <div className="text-sm font-black font-mono text-orange-600">
+                  {Math.floor(serverTimeRemainingSeconds / 60)}:{(serverTimeRemainingSeconds % 60).toString().padStart(2, '0')}
                 </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Teams & Roles
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  View and manage teams
-                </p>
+                <div className="text-[10px] text-stone-500">{isClockRunning ? 'Running' : 'Paused'}</div>
               </div>
 
-              {/* Tile 3: Market Management */}
-              <div
-                onClick={() => setActiveTab('MARKET')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <ShoppingCart className="w-6 h-6" />
-                </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Market Management
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Items, pricing and stock
-                </p>
-              </div>
-
-              {/* Tile 4: Crisis Engine */}
-              <div
-                onClick={() => setActiveTab('CRISIS')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Crisis Engine
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Create and dispatch crises
-                </p>
-              </div>
-
-              {/* Tile 5: Auction & Trading */}
-              <div
-                onClick={() => setActiveTab('AUCTION')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <Gavel className="w-6 h-6" />
-                </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Auction & Trading
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Manage auctions and trades
-                </p>
-              </div>
-
-              {/* Tile 6: Judging & Scoring */}
-              <div
-                onClick={() => setActiveTab('JUDGES')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <FileCheck className="w-6 h-6" />
-                </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Judging & Scoring
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Manage judges and scores
-                </p>
-              </div>
-
-              {/* Tile 7: Live Screen */}
-              <div
-                onClick={() => onNavigate('live-screen')}
-                className="card card-interactive p-6 space-y-3 group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <Tv className="w-6 h-6" />
-                </div>
-                <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                  Live Screen
-                </h3>
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  Control what participants see
-                </p>
-              </div>
-
-              {/* Tile 8: Admin Verification (Super Admin Only) */}
-              {isSuperAdmin() && (
-                <div
-                  id="tile-admin-verification"
-                  onClick={() => setActiveTab('ADMIN_VERIFICATION')}
-                  className="card card-interactive p-6 space-y-3 group border border-orange-500/30 hover:border-orange-500 transition-colors"
-                >
-                  <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-                    <ShieldCheck className="w-6 h-6" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100">
-                      Admin Verification
-                    </h3>
-                    <span className="badge badge-orange text-[10px]">
-                      SUPER ADMIN
-                    </span>
-                  </div>
-                  <p className="text-xs text-stone-500 dark:text-stone-400">
-                    Verify administrators by Code.SCRIET email ID and manage authorization
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Quick Live Telemetry Strip */}
-            <div className="card p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div>
-                <span className="text-[11px] font-bold text-stone-400 uppercase">Teams Competing</span>
-                <div className="text-xl font-black font-mono mt-0.5">{teams.length} Squads</div>
-              </div>
-              <div>
-                <span className="text-[11px] font-bold text-stone-400 uppercase">Total Capital in Play</span>
-                <div className="text-xl font-black font-mono text-emerald-600 mt-0.5">
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Capital in Play</span>
+                <div className="text-sm font-black font-mono text-emerald-600 truncate">
                   ₹{teams.reduce((acc, t) => acc + getBalance(t.id), 0).toLocaleString('en-IN')}
                 </div>
+                <div className="text-[10px] text-stone-500">{teams.length} Active Squads</div>
               </div>
-              <div>
-                <span className="text-[11px] font-bold text-stone-400 uppercase">Market Scarcity Stock</span>
-                <div className="text-xl font-black font-mono text-orange-600 mt-0.5">
-                  {marketItems.reduce((acc, i) => acc + i.stockRemaining, 0)} Units Left
+
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Active Crises</span>
+                <div className={`text-sm font-black font-mono ${
+                  teams.filter((t) => Boolean(t.activeCrisisId) || (activeCrisis && activeCrisis.teamId === t.id && activeCrisis.status === 'ACTIVE')).length > 0
+                    ? 'text-red-600 animate-pulse'
+                    : 'text-stone-600 dark:text-stone-300'
+                }`}>
+                  {teams.filter((t) => Boolean(t.activeCrisisId) || (activeCrisis && activeCrisis.teamId === t.id && activeCrisis.status === 'ACTIVE')).length} Alarms
+                </div>
+                <div className="text-[10px] text-stone-500">Floor Disruption</div>
+              </div>
+
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Market Scarcity</span>
+                <div className="text-sm font-black font-mono text-amber-600">
+                  {marketItems.reduce((acc, i) => acc + i.stockRemaining, 0)} Units
+                </div>
+                <div className="text-[10px] text-stone-500">{marketItems.length} SKUs Listed</div>
+              </div>
+
+              <div className="card p-3.5 space-y-1 border border-stone-200 dark:border-stone-800">
+                <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Mutations</span>
+                <div className="text-sm font-black font-mono text-stone-900 dark:text-stone-100">
+                  {auditLogs.length} Events
+                </div>
+                <div className="text-[10px] text-stone-500">Audited Changes</div>
+              </div>
+            </div>
+
+            {/* Signature Live Event Triggers (1-Click Action Bar) */}
+            <div className="card p-4 bg-gradient-to-r from-orange-500/5 via-amber-500/5 to-transparent border border-orange-500/20 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-orange-500" />
+                  <h3 className="font-heading font-black text-sm text-stone-900 dark:text-stone-100">
+                    Signature Event Triggers & Fast Commands
+                  </h3>
+                </div>
+                <span className="text-[11px] text-stone-500">One-click server-authoritative broadcast triggers</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  onClick={handleTriggerMarketShockPhase}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Trigger Market Shock (10m)</span>
+                </button>
+
+                <button
+                  onClick={handleLaunchAuctionDesk}
+                  className="px-3 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-700 dark:text-orange-300 border border-orange-500/30 text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <Gavel className="w-3.5 h-3.5" />
+                  <span>Launch Floor Auction (15m)</span>
+                </button>
+
+                <button
+                  onClick={handleDeployMassCrises}
+                  className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500 hover:text-white text-red-700 dark:text-red-300 border border-red-500/30 text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Deploy Sector Crises Wave</span>
+                </button>
+
+                <button
+                  onClick={triggerLockdown}
+                  className="px-3 py-1.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-red-600 hover:text-white text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-700 text-xs font-bold flex items-center gap-1.5 transition-all ml-auto"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Freeze Submissions (Lockdown)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleStateAdvance('REVEAL');
+                    updateLiveScreenConfig({ showLeaderboard: true, presentationMode: 'LEADERBOARD' as any });
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:opacity-95 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Grand Reveal & Leaderboard</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Squads Real-Time Command & Floor Telemetry Grid (All 10 Squads) */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-heading font-black text-lg text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-orange-500" />
+                    <span>Live Squads Command & Floor Telemetry</span>
+                    <span className="badge badge-orange text-[10px]">{teams.length} Squads</span>
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Real-time capital balance, financial health bands, crisis alarms, and instantaneous marshal overrides
+                  </p>
                 </div>
               </div>
-              <div>
-                <span className="text-[11px] font-bold text-stone-400 uppercase">Audit Mutations</span>
-                <div className="text-xl font-black font-mono mt-0.5">{auditLogs.length} Events</div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {teams.map((squad) => {
+                  const balance = getBalance(squad.id);
+                  const healthBand = getFinancialHealthBand(squad.id);
+                  const hasActiveCrisis = Boolean(squad.activeCrisisId) || (activeCrisis && activeCrisis.teamId === squad.id && activeCrisis.status === 'ACTIVE');
+                  const squadCrisisCard = hasActiveCrisis
+                    ? crisisCards.find((c) => c.id === squad.activeCrisisId) || (activeCrisis && activeCrisis.teamId === squad.id ? activeCrisis.crisis : null)
+                    : null;
+
+                  return (
+                    <div
+                      key={squad.id}
+                      className={`card p-4 space-y-3 border transition-all ${
+                        hasActiveCrisis
+                          ? 'border-red-500/50 bg-red-500/[0.02] shadow-sm'
+                          : 'border-stone-200 dark:border-stone-800 hover:border-orange-500/40'
+                      }`}
+                    >
+                      {/* Top Row: Code, Name, Health Band */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400">
+                              {squad.teamCode}
+                            </span>
+                            <span className="font-heading font-black text-sm text-stone-900 dark:text-stone-100 truncate">
+                              {squad.name}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-500 mt-0.5">
+                            {squad.currentRound || 'Round 1'}
+                          </div>
+                        </div>
+
+                        {/* Health Band Pill */}
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                            healthBand === 'HEALTHY'
+                              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                              : healthBand === 'WATCH'
+                              ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                              : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
+                          }`}
+                        >
+                          {healthBand}
+                        </span>
+                      </div>
+
+                      {/* Financial Balance */}
+                      <div className="bg-stone-50 dark:bg-stone-900/60 rounded-xl p-2.5 flex items-center justify-between border border-stone-200/60 dark:border-stone-800/60">
+                        <span className="text-[11px] font-mono text-stone-500">Live Capital:</span>
+                        <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                          ₹{balance.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+
+                      {/* Roster Badges */}
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                        {(['CEO', 'CFO', 'CTO', 'CMO'] as SimulationRole[]).map((r) => {
+                          const assigned = squad.members.some((m) => m.role === r);
+                          return (
+                            <span
+                              key={r}
+                              title={`${r}: ${assigned ? 'Filled' : 'Vacant'}`}
+                              className={`px-1.5 py-0.5 rounded font-bold ${
+                                assigned
+                                  ? 'bg-stone-200 dark:bg-stone-800 text-stone-800 dark:text-stone-200'
+                                  : 'bg-stone-100 dark:bg-stone-900 text-stone-400 line-through opacity-60'
+                              }`}
+                            >
+                              {r}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Crisis Telemetry Strip */}
+                      {hasActiveCrisis ? (
+                        <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/20 space-y-1.5 animate-pulse">
+                          <div className="flex items-center justify-between text-xs text-red-600 dark:text-red-400 font-bold">
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>{squadCrisisCard?.title || 'Operational Crisis'}</span>
+                            </span>
+                            <span className="text-[10px] font-mono">ACTIVE</span>
+                          </div>
+                          <button
+                            onClick={() => handleResolveSquadCrisis(squad)}
+                            className="w-full py-1 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center justify-center gap-1 shadow-sm transition-colors"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Resolve Crisis Now</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between text-[11px] text-stone-500 px-1">
+                          <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                            <CheckCircle className="w-3 h-3" />
+                            <span>Operations Normal</span>
+                          </span>
+                          <button
+                            onClick={() => handleInjectSquadCrisis(squad)}
+                            className="text-stone-400 hover:text-red-500 text-[10px] font-bold underline"
+                          >
+                            + Inject Crisis
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Quick Floor Actions */}
+                      <div className="pt-2 border-t border-stone-100 dark:border-stone-800 flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleQuickGrant(squad, 25000)}
+                          title="Grant ₹25,000 organizer award"
+                          className="flex-1 py-1 px-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-700 dark:text-emerald-400 text-[10px] font-bold font-mono transition-colors text-center"
+                        >
+                          +₹25k
+                        </button>
+                        <button
+                          onClick={() => handleQuickLoan(squad, 50000)}
+                          title="Disburse ₹50,000 emergency loan"
+                          className="flex-1 py-1 px-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500 hover:text-white text-amber-700 dark:text-amber-400 text-[10px] font-bold font-mono transition-colors text-center"
+                        >
+                          +₹50k Loan
+                        </button>
+                        <button
+                          onClick={() => handleQuickPenalty(squad, 10000)}
+                          title="Apply ₹10,000 rule penalty"
+                          className="flex-1 py-1 px-1.5 rounded-lg bg-red-500/10 hover:bg-red-500 hover:text-white text-red-700 dark:text-red-400 text-[10px] font-bold font-mono transition-colors text-center"
+                        >
+                          -₹10k
+                        </button>
+                        <button
+                          onClick={() => {
+                            setQuickAdjModalSquad(squad);
+                            setQuickAdjAmount(25000);
+                            setQuickAdjType('CREDIT');
+                            setQuickAdjReason('Marshal Floor Award');
+                          }}
+                          title="Custom financial adjustment"
+                          className="p-1 rounded-lg hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-500 text-xs transition-colors"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setInspectSquad(squad)}
+                          title="Inspect canvas and submitted pitch deliverables"
+                          className="p-1 rounded-lg hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-500 text-xs transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Real-Time Live Activity Stream & Ledger Mutations */}
+            <div className="card p-5 space-y-3 border border-stone-200 dark:border-stone-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-orange-500" />
+                  <h3 className="font-heading font-black text-sm text-stone-900 dark:text-stone-100">
+                    Live Event Stream & Real-time Mutations
+                  </h3>
+                  <span className="text-[11px] font-mono text-stone-400">({filteredActivities.length} recent actions)</span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {(['ALL', 'FINANCE', 'CRISIS', 'STAGE'] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      onClick={() => setActivityFilter(filter)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-mono transition-colors ${
+                        activityFilter === filter
+                          ? 'bg-orange-500 text-white shadow-sm'
+                          : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      {filter}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="divide-y divide-stone-100 dark:divide-stone-800 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                {filteredActivities.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-stone-400 font-mono">
+                    No recent mutation logs matching filter.
+                  </div>
+                ) : (
+                  filteredActivities.map((act) => (
+                    <div key={act.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${act.badgeColor}`}>
+                            {act.badge}
+                          </span>
+                          <span className="font-bold text-stone-900 dark:text-stone-100">{act.title}</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500 line-clamp-1">{act.desc}</p>
+                      </div>
+                      <span className="text-[10px] font-mono text-stone-400 whitespace-nowrap">
+                        {new Date(act.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Subsystem Deep-Dive Quick Navigation Tiles */}
+            <div className="space-y-2 pt-2">
+              <h4 className="text-xs font-mono font-bold text-stone-400 uppercase tracking-wider">
+                Subsystem Operations & Detailed Controls
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Tile 1: Event Control */}
+                <div
+                  onClick={() => setActiveTab('EVENT_CONTROL')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Play className="w-5 h-5 fill-current" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Event Control
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Manage event state, clock & round timeline
+                  </p>
+                </div>
+
+                {/* Tile 2: Teams & Roles */}
+                <div
+                  onClick={() => setActiveTab('TEAMS')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Teams & Roles
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Manage roster, re-issue tokens & members
+                  </p>
+                </div>
+
+                {/* Tile 3: Market Management */}
+                <div
+                  onClick={() => setActiveTab('MARKET')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <ShoppingCart className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Market Management
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Stock, dynamic pricing & asset catalog
+                  </p>
+                </div>
+
+                {/* Tile 4: Crisis Engine */}
+                <div
+                  onClick={() => setActiveTab('CRISIS')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Crisis Engine
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Create and dispatch scenario cards
+                  </p>
+                </div>
+
+                {/* Tile 5: Auction & Trading */}
+                <div
+                  onClick={() => setActiveTab('AUCTION')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Gavel className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Auction & Trading
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Live bidding desk & equity trades
+                  </p>
+                </div>
+
+                {/* Tile 6: Judging & Scoring */}
+                <div
+                  onClick={() => setActiveTab('JUDGES')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <FileCheck className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Judging & Scoring
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Jury rubrics, scores & floor judging
+                  </p>
+                </div>
+
+                {/* Tile 7: Live Screen */}
+                <div
+                  onClick={() => onNavigate('live-screen')}
+                  className="card card-interactive p-5 space-y-2 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Tv className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                    Live Projector Screen
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Control public screen presentation
+                  </p>
+                </div>
+
+                {/* Tile 8: Admin Verification (Super Admin Only) */}
+                {isSuperAdmin() && (
+                  <div
+                    id="tile-admin-verification"
+                    onClick={() => setActiveTab('ADMIN_VERIFICATION')}
+                    className="card card-interactive p-5 space-y-2 group border border-orange-500/30 hover:border-orange-500 transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-heading font-black text-base text-stone-900 dark:text-stone-100">
+                        Admin Verification
+                      </h3>
+                      <span className="badge badge-orange text-[9px]">
+                        SUPER
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-500 dark:text-stone-400">
+                      Manage operator credentials & permissions
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -952,6 +1641,36 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                     className="btn-secondary py-1 px-3 text-xs font-bold"
                   >
                     Set Duration
+                  </button>
+                </div>
+                <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800/80 p-1 rounded-xl">
+                  <span className="text-[10px] font-mono text-stone-500 font-bold px-1.5">BOOST:</span>
+                  <button
+                    onClick={() => {
+                      extendClock(120);
+                      showToast('Extended clock by +2 minutes');
+                    }}
+                    className="px-2 py-1 rounded bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-200 hover:bg-orange-500 hover:text-white text-xs font-bold font-mono transition-colors"
+                  >
+                    +2m
+                  </button>
+                  <button
+                    onClick={() => {
+                      extendClock(300);
+                      showToast('Extended clock by +5 minutes');
+                    }}
+                    className="px-2 py-1 rounded bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-200 hover:bg-orange-500 hover:text-white text-xs font-bold font-mono transition-colors"
+                  >
+                    +5m
+                  </button>
+                  <button
+                    onClick={() => {
+                      extendClock(600);
+                      showToast('Extended clock by +10 minutes');
+                    }}
+                    className="px-2 py-1 rounded bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-200 hover:bg-orange-500 hover:text-white text-xs font-bold font-mono transition-colors"
+                  >
+                    +10m
                   </button>
                 </div>
                 <button
@@ -2113,8 +2832,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                       value={newArtTitle}
                       onChange={(e) => setNewArtTitle(e.target.value)}
                       className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
-                    >
-                    </input>
+                    />
                   </div>
                   <div>
                     <label className="text-[11px] font-mono text-stone-500 block mb-1">URL / Resource Link</label>
@@ -2124,8 +2842,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                       value={newArtUrl}
                       onChange={(e) => setNewArtUrl(e.target.value)}
                       className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
-                    >
-                    </input>
+                    />
                   </div>
                 </div>
                 <div>
@@ -3234,6 +3951,409 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 className="btn-primary py-2 px-6 text-xs font-bold"
               >
                 Restore Snapshot State
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flash Announcement Broadcast Modal */}
+      {flashModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card max-w-xl w-full p-6 bg-white dark:bg-[#12141C] space-y-4 shadow-2xl rounded-3xl border border-orange-500/40 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto scrollbar-thin">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-800">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-black font-heading text-stone-900 dark:text-stone-100">
+                  Real-time Flash Broadcast
+                </h3>
+              </div>
+              <button
+                onClick={() => setFlashModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-500">
+              Instantly broadcast alerts to all connected participant screens and the main room projector screen.
+            </p>
+
+            {/* Quick 1-Click Presets */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">
+                Instant Event Presets (Click to Dispatch)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  {
+                    title: '⏱️ 5 MINUTES REMAINING',
+                    content: 'Five minutes remaining in the current round! Finalize your transactions and save canvas updates.',
+                    type: 'ALERT' as const,
+                  },
+                  {
+                    title: '⚡ MARKET SHOCK ACTIVE',
+                    content: 'Emergency supply chain disruption! Market asset prices have surged by 20%.',
+                    type: 'CRISIS' as const,
+                  },
+                  {
+                    title: '📢 MANDATORY CEO ASSEMBLY',
+                    content: 'All startup CEOs report to the center stage immediately for the fireside round challenge.',
+                    type: 'INFO' as const,
+                  },
+                  {
+                    title: '🚨 CRITICAL SECTOR CRISIS',
+                    content: 'Severe operational disruptions detected across startup squads! Review and resolve immediately.',
+                    type: 'CRISIS' as const,
+                  },
+                  {
+                    title: '🔒 2-MINUTE SUBMISSION WARNING',
+                    content: 'Startup Canvas & Pitch Deck lock in 2 minutes! Late submissions will not be scored.',
+                    type: 'LOCKDOWN' as const,
+                  },
+                  {
+                    title: '🏆 DELIBERATIONS CONCLUDED',
+                    content: 'Judge scoring is locked. Return to your team stations for the Grand Leaderboard Reveal!',
+                    type: 'INFO' as const,
+                  },
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSendFlashBroadcast(preset.title, preset.content, preset.type)}
+                    className="p-2.5 rounded-xl border border-stone-200 dark:border-stone-800 hover:border-orange-500/50 bg-stone-50 dark:bg-stone-900/60 hover:bg-orange-500/5 text-left transition-all group"
+                  >
+                    <div className="text-xs font-bold text-stone-900 dark:text-stone-100 group-hover:text-orange-500 truncate">
+                      {preset.title}
+                    </div>
+                    <div className="text-[10px] text-stone-500 line-clamp-1 mt-0.5">
+                      {preset.content}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Announcement Form */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendFlashBroadcast(flashTitle, flashContent, flashType);
+              }}
+              className="space-y-3 pt-3 border-t border-stone-200 dark:border-stone-800"
+            >
+              <div className="space-y-1">
+                <label className="text-[11px] font-mono font-bold text-stone-500 block">Broadcast Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Stage 2 Commencing - Market Open"
+                  value={flashTitle}
+                  onChange={(e) => setFlashTitle(e.target.value)}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-mono font-bold text-stone-500 block">Urgency / Category</label>
+                  <select
+                    value={flashType}
+                    onChange={(e) => setFlashType(e.target.value as any)}
+                    className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                  >
+                    <option value="INFO">Information (Blue)</option>
+                    <option value="ALERT">Alert / Warning (Amber)</option>
+                    <option value="CRISIS">Crisis Shock (Red)</option>
+                    <option value="LOCKDOWN">Lockdown (Crimson)</option>
+                    <option value="ROUND_CHANGE">Stage Change (Orange)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={flashSyncProjector}
+                      onChange={(e) => setFlashSyncProjector(e.target.checked)}
+                      className="rounded text-orange-500 focus:ring-orange-500"
+                    />
+                    <span className="font-bold">Sync Projector Ticker</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-mono font-bold text-stone-500 block">Message Body</label>
+                <textarea
+                  rows={3}
+                  placeholder="Detailed instructions or prompt for all teams..."
+                  value={flashContent}
+                  onChange={(e) => setFlashContent(e.target.value)}
+                  className="w-full text-xs p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setFlashModalOpen(false)}
+                  className="btn-secondary py-2 px-5 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary py-2 px-6 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Dispatch Room Broadcast</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Floor Financial Adjustment Modal */}
+      {quickAdjModalSquad && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card max-w-md w-full p-6 bg-white dark:bg-[#12141C] space-y-4 shadow-2xl rounded-3xl border border-orange-500/40 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-800">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-500" />
+                <h3 className="text-base font-black font-heading text-stone-900 dark:text-stone-100">
+                  Floor Capital Adjustment
+                </h3>
+              </div>
+              <button
+                onClick={() => setQuickAdjModalSquad(null)}
+                className="p-1 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 flex items-center justify-between text-xs">
+              <div>
+                <span className="font-mono font-bold text-stone-400 block">{quickAdjModalSquad.teamCode}</span>
+                <span className="font-heading font-black text-sm text-stone-900 dark:text-stone-100">{quickAdjModalSquad.name}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] font-mono text-stone-400 block">Current Balance</span>
+                <span className="font-mono font-black text-emerald-600">₹{getBalance(quickAdjModalSquad.id).toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleQuickAdjustmentSubmit} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickAdjType('CREDIT')}
+                  className={`py-2 rounded-xl text-xs font-bold border transition-all ${
+                    quickAdjType === 'CREDIT'
+                      ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+                      : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-800'
+                  }`}
+                >
+                  + Credit (Award)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickAdjType('DEBIT')}
+                  className={`py-2 rounded-xl text-xs font-bold border transition-all ${
+                    quickAdjType === 'DEBIT'
+                      ? 'bg-red-500 text-white border-red-500 shadow-sm'
+                      : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-800'
+                  }`}
+                >
+                  - Debit (Penalty)
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-mono font-bold text-stone-500 block">Adjustment Amount (₹)</label>
+                <input
+                  type="number"
+                  min="1000"
+                  step="1000"
+                  value={quickAdjAmount}
+                  onChange={(e) => setQuickAdjAmount(Math.max(1000, parseInt(e.target.value) || 1000))}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900 font-mono font-bold"
+                  required
+                />
+                <div className="flex gap-1.5 pt-1 text-[10px] font-mono">
+                  {[10000, 25000, 50000, 100000].map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setQuickAdjAmount(amt)}
+                      className="px-2 py-0.5 rounded bg-stone-100 dark:bg-stone-800 hover:bg-orange-500 hover:text-white transition-colors"
+                    >
+                      ₹{amt / 1000}k
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-mono font-bold text-stone-500 block">Reason / Audit Trail Note</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Marshal floor correction or milestone reward"
+                  value={quickAdjReason}
+                  onChange={(e) => setQuickAdjReason(e.target.value)}
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickAdjModalSquad(null)}
+                  className="btn-secondary py-2 px-4 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary py-2 px-5 text-xs font-bold"
+                >
+                  Execute Mutation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Squad Inspection Modal */}
+      {inspectSquad && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card max-w-2xl w-full p-6 bg-white dark:bg-[#12141C] space-y-4 shadow-2xl rounded-3xl border border-stone-200 dark:border-stone-800 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto scrollbar-thin">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200 dark:border-stone-800">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-orange-500/10 text-orange-600">
+                  {inspectSquad.teamCode}
+                </span>
+                <div>
+                  <h3 className="text-lg font-black font-heading text-stone-900 dark:text-stone-100">
+                    {inspectSquad.name}
+                  </h3>
+                  <div className="text-[11px] text-stone-500">
+                    Round: {inspectSquad.currentRound} • Capital: ₹{getBalance(inspectSquad.id).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectSquad(null)}
+                className="p-1 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Roster Table */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">
+                Squad Roster & Device Tokens
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(['CEO', 'CFO', 'CTO', 'CMO'] as SimulationRole[]).map((r) => {
+                  const m = inspectSquad.members.find((mem) => mem.role === r);
+                  return (
+                    <div key={r} className="p-2.5 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs">
+                      <span className="font-mono font-bold text-[10px] text-orange-500 block">{r}</span>
+                      <div className="font-bold text-stone-900 dark:text-stone-100 truncate mt-0.5">
+                        {m?.displayName || 'Vacant'}
+                      </div>
+                      <div className="text-[9px] font-mono text-stone-400 truncate mt-0.5">
+                        {m?.deviceToken ? 'Bound' : 'No Token'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Startup Lean Canvas Entries */}
+            <div className="space-y-2 pt-2 border-t border-stone-200 dark:border-stone-800">
+              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">
+                Startup Lean Canvas v1
+              </span>
+              {(() => {
+                const teamCanvas = canvasStore[inspectSquad.id] || canvas;
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-1">
+                      <span className="text-[10px] font-mono font-bold text-stone-400 block">Problem</span>
+                      <p className="text-stone-700 dark:text-stone-300">{teamCanvas.problem || 'Not filled yet'}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-1">
+                      <span className="text-[10px] font-mono font-bold text-stone-400 block">Solution</span>
+                      <p className="text-stone-700 dark:text-stone-300">{teamCanvas.solution || 'Not filled yet'}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-1">
+                      <span className="text-[10px] font-mono font-bold text-stone-400 block">Unique Value Proposition</span>
+                      <p className="text-stone-700 dark:text-stone-300">{teamCanvas.usp || 'Not filled yet'}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 space-y-1">
+                      <span className="text-[10px] font-mono font-bold text-stone-400 block">Revenue Model</span>
+                      <p className="text-stone-700 dark:text-stone-300">{teamCanvas.revenueModel || 'Not filled yet'}</p>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Submitted Pitch Deliverables */}
+            <div className="space-y-2 pt-2 border-t border-stone-200 dark:border-stone-800">
+              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">
+                Deliverables & Submissions
+              </span>
+              {(() => {
+                const teamArts = artifacts.filter((a) => a.teamId === inspectSquad.id);
+                if (teamArts.length === 0) {
+                  return (
+                    <div className="py-4 text-center text-xs text-stone-400 font-mono">
+                      No artifacts submitted by this squad yet.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-2">
+                    {teamArts.map((art) => (
+                      <div key={art.id} className="p-3 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 flex items-center justify-between gap-3 text-xs">
+                        <div>
+                          <div className="font-bold text-stone-900 dark:text-stone-100">{art.title}</div>
+                          <div className="text-[11px] text-stone-500">{art.kind} • {art.description}</div>
+                        </div>
+                        {art.url && (
+                          <a
+                            href={art.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1 transition-colors"
+                          >
+                            <span>Open URL</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setInspectSquad(null)}
+                className="btn-secondary py-2 px-5 text-xs font-bold"
+              >
+                Close Inspection
               </button>
             </div>
           </div>

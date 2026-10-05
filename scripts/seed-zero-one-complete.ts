@@ -9,16 +9,22 @@ const prisma = makePrismaClient();
 async function seedZeroOneComplete() {
   console.log('🚀 Starting Complete ZERO → ONE Fake Event & Team Seeding...');
 
-  // 1. Password Hashes
-  const adminPassword = 'change_this_password';
-  const teamPassword = 'ZeroOne#2026';
+  // Env-aware credentials: explicit FAKE_* vars win, then the standard
+  // SUPER_ADMIN_* seed vars, then the documented defaults. Never silently
+  // overwrites a real admin password with a hardcoded default.
+  const adminPassword =
+    process.env.FAKE_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || 'change_this_password';
+  const adminEmail = (process.env.FAKE_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || 'admin@example.com')
+    .trim()
+    .toLowerCase();
+  const teamPassword = process.env.TEAM_PASSWORD || 'ZeroOne#2026';
 
   const hashedAdminPassword = await bcrypt.hash(adminPassword, 12);
   const hashedTeamPassword = await bcrypt.hash(teamPassword, 12);
 
-  // 2. Admin User
+  // 2. Admin User (stable UUID so the zero-one arena's hardcoded
+  // INITIAL_ADMIN_AUTHORIZATIONS entry stays in sync)
   const adminId = '7b9962b4-a08c-4d24-9f28-8c722d81d20f';
-  const adminEmail = 'admin@example.com';
   console.log(`👤 Upserting Admin (${adminEmail})...`);
 
   const admin = await prisma.user.upsert({
@@ -42,41 +48,43 @@ async function seedZeroOneComplete() {
     },
   });
 
-  // 3. Team Users (TechNova Squad)
+  // 3. Team Users (TechNova Squad). IDs are stable UUIDs (User.id is a
+  // String PK — arbitrary strings work, but UUIDs keep auth middleware,
+  // logging, and the zero-one arena consistent).
   const arjunId = '34c5c597-69ed-4004-a070-53953b708ee9';
   const teamUsersData = [
     {
       id: arjunId,
       name: 'Arjun Patel',
       email: 'arjun@scriet.edu',
-      role: 'LEADER' as const,
+      teamRole: 'LEADER' as const,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
       branch: 'Computer Science',
       year: '3rd Year',
     },
     {
-      id: 'usr-sneha-reddy',
+      id: 'c9a5e2f1-4b6d-4e8a-9c3d-1a2b3c4d5e6f',
       name: 'Sneha Sharma',
       email: 'sneha@scriet.edu',
-      role: 'MEMBER' as const,
+      teamRole: 'MEMBER' as const,
       avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=150&q=80',
       branch: 'Information Technology',
       year: '3rd Year',
     },
     {
-      id: 'usr-vikram-singh',
+      id: 'd7b3f4a2-8c1e-4f5a-b6d7-2b3c4d5e6f7a',
       name: 'Vikram Singh',
       email: 'vikram@scriet.edu',
-      role: 'MEMBER' as const,
+      teamRole: 'MEMBER' as const,
       avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=150&q=80',
       branch: 'Computer Science',
       year: '3rd Year',
     },
     {
-      id: 'usr-divya-verma',
+      id: 'e8c4a5b3-9d2f-4a6b-c7e8-3c4d5e6f7a8b',
       name: 'Divya Verma',
       email: 'divya@scriet.edu',
-      role: 'MEMBER' as const,
+      teamRole: 'MEMBER' as const,
       avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
       branch: 'Electronics & Comm',
       year: '3rd Year',
@@ -110,7 +118,7 @@ async function seedZeroOneComplete() {
         avatar: tu.avatar,
       },
     });
-    createdUsers.push({ ...u, teamRole: tu.role });
+    createdUsers.push({ ...u, teamRole: tu.teamRole });
   }
 
   // 4. ZERO → ONE Event (slug: zero-one-2026)
@@ -146,7 +154,8 @@ async function seedZeroOneComplete() {
       capacity: 500,
       tags: ['zero-one', 'flagship', 'simulation', 'startup', 'arena'],
       featured: true,
-      status: 'UPCOMING',
+      // startDate is 2h in the past so the event is live on first seed.
+      status: 'ONGOING',
     },
     create: {
       id: 'evt-zero-one-2026',
@@ -171,14 +180,15 @@ async function seedZeroOneComplete() {
       capacity: 500,
       tags: ['zero-one', 'flagship', 'simulation', 'startup', 'arena'],
       featured: true,
-      status: 'UPCOMING',
+      status: 'ONGOING',
       createdBy: admin.id,
     },
   });
 
-  // 5. TechNova Squad (EventTeam)
+  // 5. TechNova Squad (EventTeam). Invite code is 8 chars (column is
+  // VarChar(8) unique) so joins via /api/teams/join work.
   const teamName = 'TechNova';
-  const inviteCode = 'TECH01';
+  const inviteCode = 'TECHN001';
   console.log(`🛡️ Upserting Team (${teamName} - ${inviteCode})...`);
 
   const arjunUser = createdUsers.find((u) => u.email === 'arjun@scriet.edu')!;
@@ -264,7 +274,7 @@ async function seedZeroOneComplete() {
   console.log(`  Role:     USER, Registered for ${eventSlug}`);
   console.log(`  Team:     ${teamName} (Invite Code: ${inviteCode})`);
   console.log('------------------------------------------------------');
-  console.log('👥 TEAMMATES (Same password: ZeroOne#2026):');
+  console.log(`👥 TEAMMATES (Same password: ${teamPassword}):`);
   for (const u of createdUsers.filter((u) => u.email !== 'arjun@scriet.edu')) {
     console.log(`  • ${u.name} (${u.email}) [Role: ${u.teamRole}]`);
   }

@@ -158,6 +158,7 @@ function App() {
                   <Route path="/about" element={withRouteBoundary(<AboutPage />)} />
                   <Route path="/events" element={withRouteBoundary(<EventsPage />)} />
                   <Route path="/events/:id" element={withRouteBoundary(<EventDetailPage />)} />
+                  <Route path="/zero-one" element={<Navigate to="/events/zero-one" replace />} />
                   <Route path="/announcements" element={withRouteBoundary(<AnnouncementsPage />)} />
                   <Route path="/announcements/:id" element={withRouteBoundary(<AnnouncementDetailPage />)} />
                   <Route path="/polls/:slug" element={withRouteBoundary(<PollDetailPage />)} />

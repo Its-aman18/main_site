@@ -993,6 +993,152 @@ export class ZeroOneBackendEngine {
     return { ...rest, adminAuthorizations: [], adminAuditLogs: [] };
   }
 
+  /**
+   * Check whether an actor holds staff privileges (Admin, SuperAdmin, Judge, Marshal).
+   */
+  public isPrivilegedStaff(actorEmail?: string, verifiedRole?: string): boolean {
+    if (!actorEmail) return false;
+    const cleanEmail = actorEmail.toLowerCase().trim();
+    if (this.isUserSuperAdmin(cleanEmail) || this.isUserAdmin(cleanEmail)) return true;
+    if (
+      verifiedRole === 'ADMIN' ||
+      verifiedRole === 'SUPER_ADMIN' ||
+      verifiedRole === 'JUDGE' ||
+      verifiedRole === 'MARSHAL'
+    ) {
+      return true;
+    }
+    if (this.state.judgeAssignments[cleanEmail] && this.state.judgeAssignments[cleanEmail].length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Authoritative lookup of a user's registered simulation team.
+   */
+  public async getTeamForUser(
+    verified: ZeroOneVerifiedIdentity | null,
+    rawToken?: string | null
+  ): Promise<Team | null> {
+    if (!verified) return null;
+    const cleanEmail = verified.email.toLowerCase().trim();
+    const userId = verified.userId;
+
+    // 1. Direct search across in-memory teams (handles emails, userIds, username prefixes)
+    for (const t of this.state.teams) {
+      const isMember = t.members.some((m) => {
+        const mEmail = (m.email || '').toLowerCase().trim();
+        return (
+          m.userId === userId ||
+          mEmail === cleanEmail ||
+          (cleanEmail.includes('@') && mEmail.includes('@') && cleanEmail.split('@')[0] === mEmail.split('@')[0])
+        );
+      });
+      if (isMember) return t;
+    }
+
+    // 2. Try resolveUserRegistration (checks DB / Main API)
+    try {
+      const reg = await this.resolveUserRegistration(verified, rawToken);
+      if (reg.registered && reg.team) {
+        const found = this.state.teams.find(
+          (t) => t.id === reg.team!.id || t.teamCode.toLowerCase() === reg.team!.code.toLowerCase()
+        );
+        if (found) return found;
+      }
+    } catch {
+      // fallback
+    }
+
+    // 3. Fallback matching username prefix to known simulation squads
+    const prefix = cleanEmail.split('@')[0];
+    if (['arjun', 'sneha', 'vikram', 'divya'].includes(prefix)) {
+      return this.state.teams.find((t) => t.id === 'team-01') || null;
+    }
+    if (['rahul', 'pooja', 'suresh', 'neha'].includes(prefix)) {
+      return this.state.teams.find((t) => t.id === 'team-02') || null;
+    }
+    if (['aman', 'priya', 'rohan', 'ananya'].includes(prefix)) {
+      return this.state.teams.find((t) => t.id === 'team-07') || null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Requester-scoped authoritative state.
+   * Privileged staff (Admin, SuperAdmin, Judge, Marshal) receive multi-team state.
+   * Normal participants receive strictly ONLY their own team's simulation and dashboard data.
+   */
+  public async getStateForRequester(
+    verified: ZeroOneVerifiedIdentity | null,
+    rawToken?: string | null
+  ): Promise<AuthoritativeServerState> {
+    const actorEmail = verified?.email;
+    const isPrivileged = this.isPrivilegedStaff(actorEmail, verified?.role);
+
+    // 1. Privileged staff gets full simulation view
+    if (isPrivileged) {
+      if (this.isUserSuperAdmin(actorEmail) || this.isUserAdmin(actorEmail)) {
+        return this.state;
+      }
+      const { adminAuthorizations: _authz, adminAuditLogs: _audit, ...rest } = this.state;
+      return { ...rest, adminAuthorizations: [], adminAuditLogs: [] };
+    }
+
+    // 2. Unauthenticated (public scoreboard / live auditorium screen)
+    if (!verified) {
+      const { adminAuthorizations: _authz, adminAuditLogs: _audit, ...rest } = this.state;
+      return { ...rest, adminAuthorizations: [], adminAuditLogs: [] };
+    }
+
+    // 3. Normal Participant: Resolve authenticated user's own team ONLY
+    const userTeam = await this.getTeamForUser(verified, rawToken);
+    const ownTeamId = userTeam ? userTeam.id : null;
+
+    const { adminAuthorizations: _authz, adminAuditLogs: _audit, ...rest } = this.state;
+
+    if (!ownTeamId) {
+      return {
+        ...rest,
+        adminAuthorizations: [],
+        adminAuditLogs: [],
+        teams: [],
+        ledger: [],
+        inventory: [],
+        purchaseProposals: [],
+        canvasStore: {},
+        artifacts: [],
+        trades: [],
+        judgeScores: [],
+        floorScores: [],
+        activeCrisis: null,
+      };
+    }
+
+    const ownCanvas = this.state.canvasStore[ownTeamId] || this.state.canvas;
+
+    return {
+      ...rest,
+      adminAuthorizations: [],
+      adminAuditLogs: [],
+      teams: this.state.teams.filter((t) => t.id === ownTeamId),
+      ledger: this.state.ledger.filter((e) => e.teamId === ownTeamId),
+      inventory: this.state.inventory.filter((i) => i.teamId === ownTeamId),
+      purchaseProposals: this.state.purchaseProposals.filter((p) => p.teamId === ownTeamId),
+      canvas: ownCanvas,
+      canvasStore: this.state.canvasStore[ownTeamId]
+        ? { [ownTeamId]: this.state.canvasStore[ownTeamId] }
+        : {},
+      artifacts: this.state.artifacts.filter((a) => a.teamId === ownTeamId),
+      trades: this.state.trades.filter((t) => t.fromTeamId === ownTeamId || t.toTeamId === ownTeamId),
+      judgeScores: this.state.judgeScores.filter((s) => s.teamId === ownTeamId),
+      floorScores: this.state.floorScores.filter((f) => f.teamId === ownTeamId),
+      activeCrisis: this.state.activeCrisis && this.state.activeCrisis.teamId === ownTeamId ? this.state.activeCrisis : null,
+    };
+  }
+
   /** Verified main-site JWT identity stashed per-request by the middleware. Never falls back to client-supplied headers. */
   public static verifiedEmailFor(req: IncomingMessage): string {
     const verified = (req as unknown as { zeroOneVerifiedEmail?: unknown })
@@ -1514,7 +1660,10 @@ export class ZeroOneBackendEngine {
     // Check if user already belongs to an existing simulation squad
     for (const t of this.state.teams) {
       const isMember = t.members.some(
-        (m) => m.userId === userId || (m.email && m.email.toLowerCase() === cleanEmail)
+        (m) =>
+          m.userId === userId ||
+          (m.email && m.email.toLowerCase() === cleanEmail) ||
+          (cleanEmail.includes('@') && m.email && cleanEmail.split('@')[0] === m.email.toLowerCase().split('@')[0])
       );
       if (isMember) {
         const resolvedTeam = {
@@ -1543,19 +1692,31 @@ export class ZeroOneBackendEngine {
       }
     }
 
-    // Default registered startup for active Code.SCRIET users in dev/test (e.g. InnovateX - Team 07)
+    // Match squad by email prefix in dev/test environment
+    const prefix = cleanEmail.split('@')[0];
+    let fallbackTeamId = 'team-07';
+    if (['arjun', 'sneha', 'vikram', 'divya'].includes(prefix)) {
+      fallbackTeamId = 'team-01';
+    } else if (['rahul', 'pooja', 'suresh', 'neha'].includes(prefix)) {
+      fallbackTeamId = 'team-02';
+    } else if (['aman', 'priya', 'rohan', 'ananya'].includes(prefix)) {
+      fallbackTeamId = 'team-07';
+    }
+    const matchedSquad = this.state.teams.find((t) => t.id === fallbackTeamId) || this.state.teams[0];
     const defaultTeam = {
-      id: 'team-07',
-      name: 'InnovateX',
-      code: 'TEAM07',
-      leaderId: userId || 'usr-arjun',
-      isLeader: cleanEmail.includes('arjun') || cleanEmail.includes('leader'),
-      members: [
-        { id: 'mem-arjun', userId: cleanEmail.includes('arjun') ? userId : 'usr-arjun', name: cleanEmail.includes('arjun') ? (verified.name || 'Arjun Patel') : 'Arjun Patel', email: cleanEmail.includes('arjun') ? cleanEmail : 'arjun@scriet.ac.in', role: 'LEADER' as const, joinedAt: '2026-01-01T00:00:00Z' },
-        { id: 'mem-aman', userId: cleanEmail.includes('aman') ? userId : 'usr-aman', name: cleanEmail.includes('aman') ? (verified.name || 'Aman Gupt') : 'Aman Gupt', email: cleanEmail.includes('aman') ? cleanEmail : 'aman@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:01:00Z' },
-        { id: 'mem-rahul', userId: cleanEmail.includes('rahul') ? userId : 'usr-rahul', name: cleanEmail.includes('rahul') ? (verified.name || 'Rahul Kumar') : 'Rahul Kumar', email: cleanEmail.includes('rahul') ? cleanEmail : 'rahul@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:02:00Z' },
-        { id: 'mem-priya', userId: cleanEmail.includes('priya') ? userId : 'usr-priya', name: cleanEmail.includes('priya') ? (verified.name || 'Priya Singh') : 'Priya Singh', email: cleanEmail.includes('priya') ? cleanEmail : 'priya@scriet.ac.in', role: 'MEMBER' as const, joinedAt: '2026-01-01T00:03:00Z' },
-      ],
+      id: matchedSquad.id,
+      name: matchedSquad.name,
+      code: matchedSquad.teamCode,
+      leaderId: matchedSquad.members[0]?.userId || userId,
+      isLeader: matchedSquad.members[0]?.email?.toLowerCase().includes(prefix) || matchedSquad.members[0]?.userId === userId,
+      members: matchedSquad.members.map((m) => ({
+        id: m.id,
+        userId: m.userId,
+        name: m.displayName || m.email?.split('@')[0] || 'Founder',
+        email: m.email || '',
+        role: (m.role === 'CEO' || m.id === matchedSquad.members[0]?.id) ? ('LEADER' as const) : ('MEMBER' as const),
+        joinedAt: m.joinedAt || new Date().toISOString(),
+      })),
     };
 
     this.syncRegisteredTeam(defaultTeam);
@@ -1856,6 +2017,27 @@ export class ZeroOneBackendEngine {
         // If client attempted to spoof a different role, override to the bound role
         authoritativeRole = boundSession.role;
       } else {
+        const isPrivileged = this.isPrivilegedStaff(effectiveEmail, authoritativeRole);
+        if (!isPrivileged && targetTeamId && !['AUTHENTICATE_SESSION', 'CLAIM_TEAM', 'CLAIM_ROLE', 'BIND_DEVICE'].includes(type)) {
+          const authenticTeam = await this.getTeamForUser({
+            userId: cmd.userId || userId || effectiveEmail,
+            email: effectiveEmail,
+            role: 'USER',
+          });
+          if (authenticTeam && targetTeamId !== authenticTeam.id) {
+            return {
+              success: false,
+              commandId,
+              code: 'FORBIDDEN',
+              message: `User belongs to ${authenticTeam.id} and cannot issue operations for team ${targetTeamId}`,
+              error: {
+                code: 'FORBIDDEN',
+                message: `User belongs to ${authenticTeam.id} and cannot issue operations for team ${targetTeamId}`,
+                commandId,
+              },
+            };
+          }
+        }
         const userTeam = targetTeamId ? this.state.teams.find((t) => t.id === targetTeamId) : undefined;
         const member = userTeam?.members.find((m) => m.email?.toLowerCase() === effectiveEmail || m.userId === effectiveEmail);
         if (member) {
@@ -4187,10 +4369,12 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
         );
       }
 
-      // 2. Authoritative State (staff authorization lists are admin-only)
+      // 2. Authoritative State (staff authorization lists are admin-only, participant receives own team only)
       if (url === '/api/state') {
+        const rawToken = extractZeroOneBearer(req);
+        const state = await serverEngine.getStateForRequester(verified, rawToken);
         res.writeHead(200);
-        return res.end(JSON.stringify(serverEngine.getPublicState(actorEmail || undefined)));
+        return res.end(JSON.stringify(state));
       }
 
       // 3. Server Clock
@@ -4255,7 +4439,12 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           res.writeHead(403, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'Not registered for event or team not found', status: reg.status }));
         }
-        const teamId = body.teamId || reg.team.id;
+        const isPrivileged = serverEngine.isPrivilegedStaff(verified.email, verified.role);
+        if (!isPrivileged && body.teamId && body.teamId !== reg.team.id) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '403 Forbidden: You cannot claim roles for another team', statusCode: 403 }));
+        }
+        const teamId = reg.team.id;
         const role = body.role;
         const result = await serverEngine.executeCommand({
           commandId: 'cmd-role-' + Date.now(),
@@ -4291,7 +4480,12 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           res.writeHead(403, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'Not registered for event or team not found' }));
         }
-        const teamId = body.teamId || reg.team.id;
+        const isPrivileged = serverEngine.isPrivilegedStaff(verified.email, verified.role);
+        if (!isPrivileged && body.teamId && body.teamId !== reg.team.id) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '403 Forbidden: You cannot bind devices for another team', statusCode: 403 }));
+        }
+        const teamId = reg.team.id;
         const role = body.role;
         const deviceId = body.deviceId || (req.headers['x-device-id'] as string) || 'dev-unknown';
         const deviceName = body.deviceName || 'Primary Workstation';
@@ -4348,12 +4542,46 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           }));
         }
         const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
+        const isPrivileged = serverEngine.isPrivilegedStaff(verified.email, verified.role);
+        const userTeam = await serverEngine.getTeamForUser(verified, rawToken);
+
+        const targetTeamId = body.teamId || body.payload?.teamId;
+        const participantRestrictedTypes = [
+          'PROPOSE_PURCHASE',
+          'APPROVE_PURCHASE',
+          'REJECT_PURCHASE',
+          'SUBMIT_CANVAS',
+          'SUBMIT_ARTIFACT',
+          'ACKNOWLEDGE_CRISIS',
+          'SUBMIT_CRISIS_RESPONSE',
+          'PLACE_BID',
+          'PROPOSE_TRADE',
+          'ACCEPT_TRADE',
+          'UPDATE_TEAM',
+        ];
+
+        if (!isPrivileged && participantRestrictedTypes.includes(body.type)) {
+          if (!userTeam || (targetTeamId && targetTeamId !== userTeam.id)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              success: false,
+              code: 'FORBIDDEN',
+              message: '403 Forbidden: You cannot dispatch commands for another team',
+              error: {
+                code: 'FORBIDDEN',
+                message: '403 Forbidden: You cannot dispatch commands for another team',
+              },
+            }));
+          }
+        }
+
         const command: Command = {
           commandId: body.commandId || 'cmd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
           deviceId: body.deviceId || (req.headers['x-device-id'] as string) || 'dev-unknown',
           userId: verified.userId || verified.email,
           userEmail: verified.email,
-          teamId: body.teamId,
+          teamId: !isPrivileged && userTeam ? userTeam.id : body.teamId,
           role: body.role,
           type: body.type,
           payload: body.payload || {},
@@ -4730,7 +4958,21 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
         }
         const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
         const userEmail = verified.email;
+        const isPrivileged = serverEngine.isPrivilegedStaff(userEmail, verified.role);
+        const userTeam = await serverEngine.getTeamForUser(verified, rawToken);
+
+        if (!isPrivileged) {
+          if (!userTeam || body.teamId !== userTeam.id) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              error: '403 Forbidden: You can only perform operations for your own team',
+              statusCode: 403,
+            }));
+          }
+        }
+
         const userRole = body.actorRole || 'CFO';
         const result = serverEngine.handlePurchase(
           body.teamId,
@@ -4749,7 +4991,21 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
         }
         const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
         const userEmail = verified.email;
+        const isPrivileged = serverEngine.isPrivilegedStaff(userEmail, verified.role);
+        const userTeam = await serverEngine.getTeamForUser(verified, rawToken);
+
+        if (!isPrivileged) {
+          if (!userTeam || body.teamId !== userTeam.id) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              error: '403 Forbidden: You cannot respond to crisis for another team',
+              statusCode: 403,
+            }));
+          }
+        }
+
         const result = serverEngine.handleCrisisResponse(body.teamId, body.optionId, body.tradeoff, userEmail);
         res.writeHead(result.success ? 200 : 400);
         return res.end(JSON.stringify(result));
@@ -4761,7 +5017,21 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
         }
         const body = await parseJsonBody(req);
+        const rawToken = extractZeroOneBearer(req);
         const userEmail = verified.email;
+        const isPrivileged = serverEngine.isPrivilegedStaff(userEmail, verified.role);
+        const userTeam = await serverEngine.getTeamForUser(verified, rawToken);
+
+        if (!isPrivileged) {
+          if (!userTeam || body.teamId !== userTeam.id) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              error: '403 Forbidden: You cannot place bids for another team',
+              statusCode: 403,
+            }));
+          }
+        }
+
         const result = serverEngine.handleAuctionBid(body.teamId, body.teamName, body.amount, userEmail);
         res.writeHead(result.success ? 200 : 400);
         return res.end(JSON.stringify(result));
@@ -4772,8 +5042,12 @@ export function zeroOneBackendMiddleware(req: IncomingMessage, res: ServerRespon
           res.writeHead(401, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'Valid Code.SCRIET authentication required' }));
         }
-        const body = await parseJsonBody(req);
         const userEmail = verified.email;
+        if (!serverEngine.isPrivilegedStaff(userEmail, verified.role)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '403 Forbidden: Judge or Administrator authorization required', statusCode: 403 }));
+        }
+        const body = await parseJsonBody(req);
         const score = serverEngine.handleJudgeScore(body, userEmail);
         res.writeHead(200);
         return res.end(JSON.stringify({ success: true, score }));

@@ -93,6 +93,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { downloadICS, googleCalendarUrl } from '@/lib/calendar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { ZeroOneGameShell } from '@/components/zero-one';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants / helpers
@@ -943,8 +944,26 @@ export default function EventDetailPage() {
   if (event.targetAudience) quickFacts.push(['Audience', event.targetAudience]);
   if (event.prerequisites) quickFacts.push(['Prereqs', event.prerequisites]);
 
-  // ── Render
+  // ── ZERO → ONE Game Experience Condition (Requirement 3 & 40)
+  if (isZeroOneEvent) {
+    return (
+      <>
+        <SEO
+          title="ZERO → ONE: Startup Simulation | Code.SCRIET"
+          description="Build your startup from an idea into a real-world solution. Complete game levels from ZERO to ONE."
+          url={`/events/${event.slug}`}
+          image="/zero-one/hero-robot.jpg"
+        />
+        <ZeroOneGameShell
+          event={event}
+          initialRounds={competitionRounds}
+          initialTeam={myTeam}
+        />
+      </>
+    );
+  }
 
+  // ── Render standard event detail
   return (
     <Layout>
       <SEO

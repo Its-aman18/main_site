@@ -102,13 +102,27 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
     'submit',
   ].includes(currentView);
 
+  const isSimulationActive = eventStatus !== 'SETUP' && eventStatus !== 'ARCHIVED';
+  const isParticipantActive = isLoggedIn && isSimulationActive;
+  const isJudge = currentRole === 'JUDGE' || isAdminVerified();
+  const isMarshal = currentRole === 'MARSHAL' || isAdminVerified();
+  const isPrivilegedStaff =
+    currentRole === 'JUDGE' ||
+    currentRole === 'MARSHAL' ||
+    currentRole === 'ADMIN' ||
+    isAdminVerified() ||
+    isSuperAdmin();
+  const isParticipantRole =
+    ['CEO', 'CFO', 'CTO', 'CMO'].includes(currentRole) ||
+    (!['JUDGE', 'MARSHAL'].includes(currentRole) && !isAdminVerified());
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-[#EFE8DD] dark:border-[#202432] bg-[#FAF8F5]/90 dark:bg-[#07080B]/90 backdrop-blur-md transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Left: Brand Identity */}
         <div className="flex items-center gap-3 sm:gap-5">
           <div
-            onClick={() => onNavigate('landing')}
+            onClick={() => onNavigate(isParticipantActive ? 'team-dashboard' : 'landing')}
             className="cursor-pointer flex items-center gap-2 hover:opacity-95 transition-opacity"
           >
             <CodeScrietLogo size={34} />
@@ -118,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
 
           {/* Subdomain / Event Mark */}
           <div
-            onClick={() => onNavigate(isSimulationView ? 'team-dashboard' : 'landing')}
+            onClick={() => onNavigate(isParticipantActive ? 'team-dashboard' : 'landing')}
             className="cursor-pointer inline-flex items-center gap-1.5 font-bold tracking-tight text-stone-900 dark:text-stone-100 hover:text-orange-600 transition-colors"
           >
             <span className="font-heading text-sm sm:text-base tracking-wide uppercase font-extrabold text-orange-600 dark:text-orange-500">
@@ -139,38 +153,46 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
 
         {/* Center: Desktop Navigation */}
         <nav className="hidden lg:flex items-center gap-1 xl:gap-2 text-sm font-medium text-stone-700 dark:text-stone-300">
-          <button
-            onClick={() => onNavigate('landing')}
-            className={`px-3 py-1.5 rounded-full transition-colors ${
-              currentView === 'landing'
-                ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
-                : 'hover:text-orange-600 dark:hover:text-orange-400'
-            }`}
-          >
-            Home
-          </button>
+          {/* Public Views - hidden for active simulation participants */}
+          {!isParticipantActive && (
+            <>
+              <button
+                onClick={() => onNavigate('landing')}
+                className={`px-3 py-1.5 rounded-full transition-colors ${
+                  currentView === 'landing'
+                    ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
+                    : 'hover:text-orange-600 dark:hover:text-orange-400'
+                }`}
+              >
+                Home
+              </button>
 
-          <button
-            onClick={() => onNavigate('events-directory')}
-            className={`px-3 py-1.5 rounded-full transition-colors ${
-              currentView === 'events-directory'
-                ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
-                : 'hover:text-orange-600 dark:hover:text-orange-400'
-            }`}
-          >
-            Events
-          </button>
+              <button
+                onClick={() => onNavigate('events-directory')}
+                className={`px-3 py-1.5 rounded-full transition-colors ${
+                  currentView === 'events-directory'
+                    ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
+                    : 'hover:text-orange-600 dark:hover:text-orange-400'
+                }`}
+              >
+                Events
+              </button>
+            </>
+          )}
 
-          <button
-            onClick={() => onNavigate('team-dashboard')}
-            className={`px-3 py-1.5 rounded-full transition-colors ${
-              isSimulationView
-                ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
-                : 'hover:text-orange-600 dark:hover:text-orange-400'
-            }`}
-          >
-            Team Hub
-          </button>
+          {/* Team Hub - visible to participants, admins, and pre-event visitors */}
+          {(isParticipantRole || isAdminVerified() || !isLoggedIn) && (
+            <button
+              onClick={() => onNavigate('team-dashboard')}
+              className={`px-3 py-1.5 rounded-full transition-colors ${
+                isSimulationView
+                  ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
+                  : 'hover:text-orange-600 dark:hover:text-orange-400'
+              }`}
+            >
+              Team Hub
+            </button>
+          )}
 
           <button
             onClick={() => onNavigate('live-screen')}
@@ -183,27 +205,33 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
             Live Screen
           </button>
 
-          <button
-            onClick={() => onNavigate('judge-portal')}
-            className={`px-3 py-1.5 rounded-full transition-colors ${
-              currentView === 'judge-portal'
-                ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
-                : 'hover:text-orange-600 dark:hover:text-orange-400'
-            }`}
-          >
-            Judge
-          </button>
+          {/* Role-specific: Judge (Only visible to Judge role or server-verified admin) */}
+          {(currentRole === 'JUDGE' || isAdminVerified()) && (
+            <button
+              onClick={() => onNavigate('judge-portal')}
+              className={`px-3 py-1.5 rounded-full transition-colors ${
+                currentView === 'judge-portal'
+                  ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
+                  : 'hover:text-orange-600 dark:hover:text-orange-400'
+              }`}
+            >
+              Judge
+            </button>
+          )}
 
-          <button
-            onClick={() => onNavigate('marshal-portal')}
-            className={`px-3 py-1.5 rounded-full transition-colors ${
-              currentView === 'marshal-portal'
-                ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
-                : 'hover:text-orange-600 dark:hover:text-orange-400'
-            }`}
-          >
-            Marshal
-          </button>
+          {/* Role-specific: Marshal (Only visible to Marshal role or server-verified admin) */}
+          {(currentRole === 'MARSHAL' || isAdminVerified()) && (
+            <button
+              onClick={() => onNavigate('marshal-portal')}
+              className={`px-3 py-1.5 rounded-full transition-colors ${
+                currentView === 'marshal-portal'
+                  ? 'text-orange-600 dark:text-orange-400 font-semibold bg-orange-500/10'
+                  : 'hover:text-orange-600 dark:hover:text-orange-400'
+              }`}
+            >
+              Marshal
+            </button>
+          )}
 
           {/* Admin Panel button - ONLY visible if user is server-verified admin */}
           {isAdminVerified() && (
@@ -220,48 +248,59 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
 
         {/* Right: Team Switcher, Theme Toggle, Profile & Role Switcher */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Team Switcher (when in simulation) */}
-          <div className="relative" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => setIsTeamDropdownOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 hover:border-orange-500 transition-colors"
+          {/* Team Identity / Switcher */}
+          {isPrivilegedStaff ? (
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsTeamDropdownOpen((prev) => !prev)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 hover:border-orange-500 transition-colors cursor-pointer"
+                title="Select Active Team (Staff Access)"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-orange-500" />
+                <span>{currentTeam?.teamCode || '—'}</span>
+                <ChevronDown className="w-3 h-3 text-stone-400" />
+              </button>
+
+              {isTeamDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#12141C] rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400 px-3 py-1.5">
+                    Select Active Team
+                  </div>
+                  <div className="max-h-60 overflow-y-auto space-y-1">
+                    {teams.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          setCurrentTeamId(t.id);
+                          setIsTeamDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
+                          t.id === currentTeam.id
+                            ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 font-bold'
+                            : 'hover:bg-stone-100 dark:hover:bg-stone-800/60 text-stone-700 dark:text-stone-300'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {t.teamCode} - {t.name}
+                        </span>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          {t.healthScore}%
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 select-none"
+              title={`Registered Team: ${currentTeam?.teamCode || '—'} (${currentTeam?.name || ''})`}
             >
               <Briefcase className="w-3.5 h-3.5 text-orange-500" />
               <span>{currentTeam?.teamCode || '—'}</span>
-              <ChevronDown className="w-3 h-3 text-stone-400" />
-            </button>
-
-            {isTeamDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#12141C] rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400 px-3 py-1.5">
-                  Select Active Team
-                </div>
-                <div className="max-h-60 overflow-y-auto space-y-1">
-                  {teams.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        setCurrentTeamId(t.id);
-                        setIsTeamDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
-                        t.id === currentTeam.id
-                          ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 font-bold'
-                          : 'hover:bg-stone-100 dark:hover:bg-stone-800/60 text-stone-700 dark:text-stone-300'
-                      }`}
-                    >
-                      <span className="truncate">
-                        {t.teamCode} - {t.name}
-                      </span>
-                      <span className="text-[10px] text-stone-400 font-mono">
-                        {t.healthScore}%
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Theme Toggle Button */}
           <button
@@ -489,60 +528,71 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
               </button>
             </div>
           )}
-          <button
-            onClick={() => {
-              onNavigate('landing');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
-          >
-            Home Landing
-          </button>
-          <button
-            onClick={() => {
-              onNavigate('events-directory');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
-          >
-            Events (codescriet.dev/events)
-          </button>
-          <button
-            onClick={() => {
-              onNavigate('team-dashboard');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-orange-600"
-          >
-            Team Dashboard
-          </button>
-          <button
-            onClick={() => {
-              onNavigate('market');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
-          >
-            Digital Market
-          </button>
-          <button
-            onClick={() => {
-              onNavigate('crisis');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-red-600"
-          >
-            Active Crisis
-          </button>
-          <button
-            onClick={() => {
-              onNavigate('canvas');
-              setIsMobileMenuOpen(false);
-            }}
-            className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
-          >
-            Startup Canvas
-          </button>
+          {/* Public Views - hidden for active simulation participant */}
+          {!isParticipantActive && (
+            <>
+              <button
+                onClick={() => {
+                  onNavigate('landing');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                Home Landing
+              </button>
+              <button
+                onClick={() => {
+                  onNavigate('events-directory');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                Events (codescriet.dev/events)
+              </button>
+            </>
+          )}
+          {(isParticipantRole || isAdminVerified() || !isLoggedIn) && (
+            <button
+              onClick={() => {
+                onNavigate('team-dashboard');
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-orange-600"
+            >
+              Team Dashboard
+            </button>
+          )}
+          {(isParticipantRole || isAdminVerified() || !isLoggedIn) && (
+            <>
+              <button
+                onClick={() => {
+                  onNavigate('market');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                Digital Market
+              </button>
+              <button
+                onClick={() => {
+                  onNavigate('crisis');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-red-600"
+              >
+                Active Crisis
+              </button>
+              <button
+                onClick={() => {
+                  onNavigate('canvas');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                Startup Canvas
+              </button>
+            </>
+          )}
           <button
             onClick={() => {
               onNavigate('live-screen');
@@ -552,6 +602,28 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate }) => {
           >
             Auditorium Live Screen
           </button>
+          {(currentRole === 'JUDGE' || isAdminVerified()) && (
+            <button
+              onClick={() => {
+                onNavigate('judge-portal');
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-purple-600"
+            >
+              Judge Portal
+            </button>
+          )}
+          {(currentRole === 'MARSHAL' || isAdminVerified()) && (
+            <button
+              onClick={() => {
+                onNavigate('marshal-portal');
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full text-left py-2 px-3 rounded-lg text-sm font-semibold hover:bg-stone-100 dark:hover:bg-stone-800 text-blue-600"
+            >
+              Marshal Portal
+            </button>
+          )}
 
           {/* Mobile Admin Link - SERVER AUTHORIZATION CHECK */}
           {isAdminVerified() && (

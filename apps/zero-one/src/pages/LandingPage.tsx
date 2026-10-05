@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { ZERO_ONE_CONFIG } from '../data/zeroOneConfig';
 import { mockRoles } from '../data/zeroOneMockData';
+import { MissionMap } from '../components/MissionMap';
 
 interface LandingPageProps {
   onNavigate: (view: string) => void;
@@ -35,8 +36,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
   const { currentTeam, getBalance, eventStatus, serverTimeRemainingSeconds } = useSimulation();
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 transition-colors overflow-x-hidden">
-      {/* Background grid texture matching Code.SCRIET design language */}
+    <div className="zo-game-shell min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 transition-colors overflow-x-hidden">
+      {/* Background grid texture matching the mission-control design language */}
       <div className="bg-grid-texture relative pb-16 pt-8 sm:pt-14 overflow-hidden">
         {/* Subtle warm amber ambient gradient */}
         <div className="absolute top-0 right-1/4 -mt-20 w-96 h-96 bg-orange-400/10 dark:bg-orange-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -52,6 +53,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   <Sparkles className="w-3.5 h-3.5 text-orange-500" />
                   <span>CODE.SCRIET FLAGSHIP</span>
                 </div>
+
+                <div className="zo-landing-kicker">MISSION CONTROL / SIMULATION 01</div>
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   <span>SIMULATION ACTIVE • {eventStatus}</span>
@@ -68,7 +71,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   </span>
                 </h1>
                 <p className="text-2xl sm:text-3xl font-serif italic text-stone-800 dark:text-stone-200 font-medium">
-                  From ideas to startups.
+                  Build a startup from zero.
                 </p>
               </div>
 
@@ -104,7 +107,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate('onboarding')}
                   className="btn-primary text-base py-3.5 px-8 shadow-xl shadow-orange-500/25 group flex items-center gap-2 cursor-pointer"
                 >
-                  <span>Join Event Track</span>
+                  <span>Start Mission</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </button>
 
@@ -113,7 +116,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   onClick={() => onNavigate('team-dashboard')}
                   className="btn-secondary text-base py-3.5 px-7 cursor-pointer"
                 >
-                  <span>Enter Founder Hub</span>
+                  <span>Enter Mission Control</span>
                 </button>
 
                 <button
@@ -125,6 +128,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   <span>Auditorium Screen</span>
                 </button>
               </div>
+
+              <MissionMap currentRound="ROUND 1" />
             </div>
 
             {/* Right Hero Graphic */}

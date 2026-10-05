@@ -28,6 +28,7 @@ import {
   Award,
 } from 'lucide-react';
 import { RunwayHealthIndicator } from '../components/RunwayHealthIndicator';
+import { MissionMap } from '../components/MissionMap';
 
 interface TeamDashboardPageProps {
   onNavigate: (view: string) => void;
@@ -63,14 +64,15 @@ export const TeamDashboardPage: React.FC<TeamDashboardPageProps> = ({ onNavigate
   );
   const teamInventory = inventory.filter((i) => i.teamId === currentTeam.id);
   const teamLedger = ledger.filter((e) => e.teamId === currentTeam.id);
+  const missionNumber = currentTeam.currentRound.match(/\d+/)?.[0] || '01';
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 flex pb-16 md:pb-0 transition-colors">
+    <div className="zo-game-shell min-h-screen bg-[#FAF8F5] dark:bg-[#07080B] text-stone-900 dark:text-stone-100 flex pb-16 md:pb-0 transition-colors">
       {/* Sidebar Navigation matching Screenshot 3 */}
       <aside className="w-64 border-r border-[#EFE8DD] dark:border-[#202432] bg-[#FAF8F5] dark:bg-[#0A0C14] hidden md:flex flex-col justify-between p-4 flex-shrink-0">
         <div className="space-y-1.5">
-          <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-stone-400">
-            Founder Navigation
+          <div className="px-3 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-stone-400">
+            Mission Control
           </div>
 
           <button
@@ -162,7 +164,31 @@ export const TeamDashboardPage: React.FC<TeamDashboardPageProps> = ({ onNavigate
       </aside>
 
       {/* Main Dashboard Content */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
+      <main className="zo-game-main flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
+      <div className="zo-hud">
+        <div className="zo-hud__brand">
+          <span className="zo-eyebrow">STARTUP SIMULATION</span>
+          <strong>ZERO <em>→</em> ONE</strong>
+        </div>
+        <div className="zo-hud__mission">
+          <span>LEVEL {missionNumber}</span>
+          <strong>{currentTeam.currentRound.replace(/^\w+\s*/, '') || 'MISSION ACTIVE'}</strong>
+        </div>
+        <div className="zo-hud__stats">
+          <span><small>TEAM</small>{currentTeam.name}</span>
+          <span><small>CAPITAL</small>₹{balance.toLocaleString('en-IN')}</span>
+          <span><small>TIME</small>{formatTimer(serverTimeRemainingSeconds)}</span>
+        </div>
+      </div>
+      <MissionMap currentRound={currentTeam.currentRound} />
+      <div className="zo-mission-intro">
+        <div>
+          <span className="zo-eyebrow">CURRENT MISSION / {missionNumber}</span>
+          <h2>Take {currentTeam.name} from zero to signal.</h2>
+          <p>Your team is the startup. Every purchase, crisis response and pitch decision changes the run.</p>
+        </div>
+        <div className="zo-status-chip"><i /> MISSION ACTIVE</div>
+      </div>
         {/* Welcome Back & Timer Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-stone-200 dark:border-stone-800">
           <div>

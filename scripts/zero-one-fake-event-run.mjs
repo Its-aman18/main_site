@@ -94,7 +94,7 @@ const balanceOf = (ledger, teamId) =>
 
 // ---------- 0. preflight ----------
 step('0. Preflight — logins, backend, super-admin, backup snapshot');
-let envAdminPassword = null;
+let envAdminPassword = process.env.SUPER_ADMIN_PASSWORD || null;
 try {
   const env = {};
   for (let line of fs.readFileSync(path.join(process.cwd(), '.env'), 'utf8').split('\n')) {
@@ -102,12 +102,23 @@ try {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
     if (m) env[m[1]] = m[2].trim();
   }
-  envAdminPassword = env.SUPER_ADMIN_PASSWORD;
+  envAdminPassword = envAdminPassword || env.SUPER_ADMIN_PASSWORD || null;
 } catch { /* no .env */ }
+if (!envAdminPassword) {
+  console.log('  FATAL need SUPER_ADMIN_PASSWORD in env or .env for the fake admin login');
+  process.exit(1);
+}
 const TEAM_USERS = [
   ['arjun@scriet.edu', TEAM_PASSWORD], ['sneha@scriet.edu', TEAM_PASSWORD],
   ['rahul@scriet.edu', TEAM_PASSWORD], ['pooja@scriet.edu', TEAM_PASSWORD],
   ['karan@scriet.edu', TEAM_PASSWORD], ['ishita@scriet.edu', TEAM_PASSWORD],
+];
+// Must stay in sync with TEAM_USERS above: every founder logs in with a real
+// main-site JWT, so registration uses exactly these accounts (no extras).
+const FOUNDERS = [
+  ['Arjun Patel', 'arjun@scriet.edu'], ['Sneha Reddy', 'sneha@scriet.edu'],
+  ['Rahul Yadav', 'rahul@scriet.edu'], ['Pooja Gupta', 'pooja@scriet.edu'],
+  ['Karan Malhotra', 'karan@scriet.edu'], ['Ishita Bose', 'ishita@scriet.edu'],
 ];
 try {
   await mainLogin(ADMIN, envAdminPassword);
@@ -148,12 +159,8 @@ try {
     const adminToken = login.body.token;
     let event = (await apiCall('/api/events/zero-one-2026', { token: adminToken })).body;
     check('main-site event exists', !!event?.id, `slug=${event?.slug}`);
-    const founders = [
-      ['Rahul Yadav', 'rahul@scriet.edu'], ['Pooja Gupta', 'pooja@scriet.edu'],
-      ['Suresh Kumar', 'suresh@scriet.edu'], ['Meera Singh', 'meera@scriet.edu'],
-      ['Karan Malhotra', 'karan@scriet.edu'], ['Ishita Bose', 'ishita@scriet.edu'],
-      ['Aditya Rao', 'aditya@scriet.edu'], ['Nisha Kapoor', 'nisha@scriet.edu'],
-    ];
+    // Single source of truth: FOUNDERS (kept in sync with TEAM_USERS).
+    const founders = FOUNDERS;
     let joined = 0;
     for (const [name, email] of founders) {
       let token = null;
@@ -168,7 +175,7 @@ try {
       const already = j.status === 400 || j.status === 409;
       if (j.status === 200 || j.status === 201 || already) joined++;
     }
-    check('8 founders registered for event', joined === 8, `joined=${joined}`);
+    check(`${founders.length} founders registered for event`, joined === founders.length, `joined=${joined}`);
   }
 } catch (e) {
   console.log(`  SKIP main-site part (API down?): ${e.message}`);

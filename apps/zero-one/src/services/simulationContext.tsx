@@ -92,8 +92,10 @@ interface SimulationContextType {
   isClockRunning: boolean;
   toggleClock: () => void;
   resetClock: (minutes?: number) => void;
+  extendClock: (secondsToAdd: number) => void;
   isLockdownActive: boolean;
   triggerLockdown: () => void;
+  releaseLockdown: () => void;
   revealResults: () => void;
 
   // Teams & Active Team
@@ -263,6 +265,52 @@ const zoFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
   return fetch(resolveApiUrl(path), { credentials: 'include', ...init, headers });
 };
 
+/**
+ * Resolves the authenticated user's own simulation team.
+ * Server context takes precedence, followed by membership lookup across teams.
+ */
+export const resolveUserOwnTeamId = (
+  user: CodeScrietUser | null,
+  ctx: ZeroOneContext | null,
+  teamsList: Team[]
+): string => {
+  if (ctx?.team?.id) {
+    return ctx.team.id;
+  }
+  if (user?.email) {
+    const cleanEmail = user.email.toLowerCase().trim();
+    for (const t of teamsList) {
+      if (
+        t.members.some(
+          (m) =>
+            m.email?.toLowerCase().trim() === cleanEmail ||
+            m.userId === user.id ||
+            (cleanEmail.includes('@') && m.email && cleanEmail.split('@')[0] === m.email.toLowerCase().split('@')[0])
+        )
+      ) {
+        return t.id;
+      }
+    }
+    for (const t of INITIAL_TEAMS) {
+      if (
+        t.members.some(
+          (m) =>
+            m.email?.toLowerCase().trim() === cleanEmail ||
+            m.userId === user.id ||
+            (cleanEmail.includes('@') && m.email && cleanEmail.split('@')[0] === m.email.toLowerCase().split('@')[0])
+        )
+      ) {
+        return t.id;
+      }
+    }
+    const prefix = cleanEmail.split('@')[0];
+    if (['arjun', 'sneha', 'vikram', 'divya'].includes(prefix)) return 'team-01';
+    if (['rahul', 'pooja', 'suresh', 'neha'].includes(prefix)) return 'team-02';
+    if (['aman', 'priya', 'rohan', 'ananya'].includes(prefix)) return 'team-07';
+  }
+  return teamsList[0]?.id || 'team-07';
+};
+
 export const SimulationContext = createContext<SimulationContextType | null>(null);
 
 export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -339,9 +387,6 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLockdownActive, setIsLockdownActive] = useState<boolean>(false);
 
   // 3. Teams State
-  // Non-empty invariant: every consumer (header, dashboards, engine math)
-  // assumes at least one team. Corrupt/empty storage or payloads fall back
-  // to the seeded squads instead of crashing the app.
   const sanitizeTeams = (value: unknown): Team[] => {
     if (!Array.isArray(value) || value.length === 0) return INITIAL_TEAMS;
     return value as Team[];
@@ -359,7 +404,48 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const setTeamsGuarded = useCallback((value: unknown) => {
     setTeams(sanitizeTeams(value));
   }, []);
-  const [currentTeamId, setCurrentTeamId] = useState<string>('team-07');
+
+  // Privileged selected team id (isolated to Judge, Marshal, and Admin roles)
+  const [privilegedSelectedTeamId, setPrivilegedSelectedTeamId] = useState<string>('team-07');
+
+  const isPrivilegedStaff = useMemo(() => {
+    if (currentRole === 'JUDGE' || currentRole === 'MARSHAL') return true;
+    if (serverAdminStatus === 'ACTIVE' || serverIsSuperAdmin) return true;
+    const cleanEmail = (currentUser?.email || '').toLowerCase().trim();
+    if (
+      cleanEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase() ||
+      cleanEmail === 'admin@example.com' ||
+      cleanEmail === 'applicationinformation73737@gmail.com' ||
+      currentUser.role === 'ADMIN' ||
+      currentUser.role === 'SUPERADMIN'
+    ) {
+      return true;
+    }
+    const auth = adminAuthorizations.find(
+      (a) => a.email.toLowerCase() === cleanEmail || a.userId === currentUser.id
+    );
+    if (auth && (auth.status === 'ACTIVE' || auth.active)) return true;
+    return false;
+  }, [currentRole, serverAdminStatus, serverIsSuperAdmin, currentUser.email, currentUser.id, currentUser.role, adminAuthorizations]);
+
+  const ownTeamId = useMemo(() => {
+    return resolveUserOwnTeamId(currentUser, zeroOneContext, teams);
+  }, [currentUser, zeroOneContext, teams]);
+
+  // For normal participants, currentTeamId is strictly read-only and locked to ownTeamId.
+  // For privileged staff (Judge, Marshal, Admin), currentTeamId uses privilegedSelectedTeamId.
+  const currentTeamId = useMemo(() => {
+    if (isPrivilegedStaff) {
+      return privilegedSelectedTeamId || ownTeamId;
+    }
+    return ownTeamId;
+  }, [isPrivilegedStaff, privilegedSelectedTeamId, ownTeamId]);
+
+  const setCurrentTeamId = useCallback((id: string) => {
+    if (isPrivilegedStaff) {
+      setPrivilegedSelectedTeamId(id);
+    }
+  }, [isPrivilegedStaff]);
 
   // 4. Financial Ledger (Append-Only)
   const [ledger, setLedger] = useState<LedgerEntry[]>(() => {
@@ -1112,6 +1198,23 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [isClockRunning, currentUser.id, currentUser.email, currentUser.name, logAuditAction]
   );
 
+  const extendClock = useCallback(
+    (secondsToAdd: number) => {
+      setServerTimeRemainingSeconds((prev) => {
+        const next = Math.max(0, prev + secondsToAdd);
+        realtimeBus.emit('CLOCK_SYNC', { seconds: next, isRunning: isClockRunning }, currentUser.name);
+        return next;
+      });
+      commandSync.dispatch('EXTEND_CLOCK', { addedSeconds: secondsToAdd }, {
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        role: 'ADMIN',
+      });
+      logAuditAction('CLOCK_EXTENDED', 'CLOCK', `Extended clock by ${secondsToAdd}s (${Math.round(secondsToAdd / 60)} min)`, 'ADMIN');
+    },
+    [isClockRunning, currentUser.id, currentUser.email, currentUser.name, logAuditAction]
+  );
+
   // Team Update (server-authoritative via UPDATE_TEAM; health/status edits in
   // Teams & Roles reach every device, not just this browser).
   const updateTeam = useCallback((teamId: string, updates: Partial<Team>) => {
@@ -1547,8 +1650,8 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const resolveCrisisManually = useCallback(
     (teamId: string, reason: string) => {
-      if (!activeCrisis) return;
-      setActiveCrisis((prev) => (prev ? { ...prev, status: 'RESOLVED', tradeoffGivenUp: `Manual: ${reason}` } : null));
+      setActiveCrisis((prev) => (prev && prev.teamId === teamId ? { ...prev, status: 'RESOLVED', tradeoffGivenUp: `Manual: ${reason}` } : prev));
+      setTeams((prev) => prev.map((t) => (t.id === teamId ? { ...t, activeCrisisId: undefined } : t)));
       commandSync.dispatch('RESOLVE_CRISIS_MANUALLY', { teamId, reason }, {
         userId: currentUser.id,
         userEmail: currentUser.email,
@@ -1556,7 +1659,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
       logAuditAction('CRISIS_RESOLVED_MANUALLY', teamId, reason, 'ADMIN');
     },
-    [activeCrisis, currentUser.id, currentUser.email, logAuditAction]
+    [currentUser.id, currentUser.email, logAuditAction]
   );
 
   const submitCrisisResponse = useCallback(
@@ -2078,6 +2181,20 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     logAuditAction('LOCKDOWN_STARTED', 'ALL', 'Lockdown started room-wide', 'ADMIN');
   }, [addAnnouncement, currentUser.id, currentUser.email, currentUser.name, logAuditAction]);
 
+  const releaseLockdown = useCallback(() => {
+    setIsLockdownActive(false);
+    commandSync.dispatch('LOCKDOWN', {
+      active: false,
+    }, {
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      role: 'ADMIN',
+    });
+
+    realtimeBus.emit('LOCKDOWN_RELEASED', {}, currentUser.name);
+    logAuditAction('LOCKDOWN_RELEASED', 'ALL', 'Lockdown released room-wide', 'ADMIN');
+  }, [currentUser.id, currentUser.email, currentUser.name, logAuditAction]);
+
   // Rehearsal One-Click Reset & Reseed.
   // Clears ONLY simulation replica keys — the operator's identity, session
   // tokens, device binding, theme, and API-origin hints survive the reset.
@@ -2220,6 +2337,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const switchUser = useCallback((user: CodeScrietUser, role: SimulationRole | 'ADMIN' | 'JUDGE' | 'MARSHAL' | 'PUBLIC') => {
     setCurrentUser(user);
     setCurrentRole(role);
+    setZeroOneContext(null);
   }, []);
 
   const logout = useCallback(() => {
@@ -2232,11 +2350,16 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setServerIsSuperAdmin(false);
     clearZeroOneToken();
     persistStoredUser(null);
+    setZeroOneContext(null);
+    setPrivilegedSelectedTeamId('team-07');
     try {
       localStorage.removeItem('token');
       sessionStorage.removeItem('token');
       localStorage.removeItem('zero_one_device_token');
       localStorage.removeItem('zero_one_admin_authorizations');
+      localStorage.removeItem('zero_one_role');
+      localStorage.removeItem('zero_one_team_id');
+      sessionStorage.removeItem('zero_one_team_id');
       zoFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     } catch {
       // storage blocked — in-memory state is already cleared above
@@ -2936,8 +3059,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       isClockRunning,
       toggleClock,
       resetClock,
+      extendClock,
       isLockdownActive,
       triggerLockdown,
+      releaseLockdown,
       revealResults,
       teams,
       currentTeam,
@@ -3035,8 +3160,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       isClockRunning,
       toggleClock,
       resetClock,
+      extendClock,
       isLockdownActive,
       triggerLockdown,
+      releaseLockdown,
       revealResults,
       teams,
       currentTeam,

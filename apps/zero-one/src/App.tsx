@@ -22,7 +22,7 @@ import { CodeScrietAuthGate } from './components/CodeScrietAuthGate';
 
 const parseRouteFromHash = (hashStr: string): string => {
   const clean = hashStr.replace(/^#/, '').trim();
-  if (!clean) return 'landing';
+  if (!clean) return '';
   if (clean.includes('=')) {
     const parts = clean.split('&');
     for (const part of parts) {
@@ -37,21 +37,40 @@ const parseRouteFromHash = (hashStr: string): string => {
 };
 
 const SimulationApp: React.FC = () => {
-  const { isAdminVerified } = useSimulation();
+  const { isLoggedIn, eventStatus, currentRole, isAdminVerified } = useSimulation();
+
+  const isSimulationActive = eventStatus !== 'SETUP' && eventStatus !== 'ARCHIVED';
+  const isParticipantActive = isLoggedIn && isSimulationActive;
+
   // Navigation State with URL Hash and Query Sync
   const [currentView, setCurrentView] = useState<string>(() => {
-    return parseRouteFromHash(window.location.hash);
+    const raw = parseRouteFromHash(window.location.hash);
+    if (!raw) {
+      // If no hash provided, active participants start directly in team-dashboard
+      const savedUser = localStorage.getItem('codescriet_user');
+      const savedStatus = localStorage.getItem('codescriet_zero_one_status') || 'ROUND_2';
+      const isLiveSim = savedStatus !== 'SETUP' && savedStatus !== 'ARCHIVED';
+      if (savedUser && isLiveSim) {
+        return 'team-dashboard';
+      }
+      return 'landing';
+    }
+    return raw;
   });
 
   // Handle URL hash changes
   useEffect(() => {
     const handleHashChange = () => {
       const route = parseRouteFromHash(window.location.hash);
-      if (route) setCurrentView(route);
+      if (route) {
+        setCurrentView(route);
+      } else {
+        setCurrentView(isParticipantActive ? 'team-dashboard' : 'landing');
+      }
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [isParticipantActive]);
 
   const navigateTo = (view: string) => {
     setCurrentView(view);
@@ -88,6 +107,27 @@ const SimulationApp: React.FC = () => {
         return currentView;
     }
   })();
+
+  // Active participant routing: ensure authenticated participants land directly on Team Hub
+  // and do not linger on marketing Home or Events during an active simulation.
+  useEffect(() => {
+    if (isParticipantActive) {
+      const publicViews = ['landing', 'home', 'events', 'events-directory'];
+      if (!window.location.hash || publicViews.includes(normalizedView)) {
+        navigateTo('team-dashboard');
+      }
+    }
+  }, [isParticipantActive, normalizedView]);
+
+  // Role permissions routing: ensure non-judge/non-marshal participants are guarded
+  useEffect(() => {
+    if (normalizedView === 'judge-portal' && currentRole !== 'JUDGE' && !isAdminVerified()) {
+      navigateTo('team-dashboard');
+    }
+    if (normalizedView === 'marshal-portal' && currentRole !== 'MARSHAL' && !isAdminVerified()) {
+      navigateTo('team-dashboard');
+    }
+  }, [normalizedView, currentRole, isAdminVerified]);
 
   const knownViews = [
     'landing',
@@ -179,12 +219,20 @@ const SimulationApp: React.FC = () => {
         )}
         {normalizedView === 'judge-portal' && (
           <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
-            <JudgePortalPage onNavigate={navigateTo} />
+            {currentRole === 'JUDGE' || isAdminVerified() ? (
+              <JudgePortalPage onNavigate={navigateTo} />
+            ) : (
+              <TeamDashboardPage onNavigate={navigateTo} />
+            )}
           </CodeScrietAuthGate>
         )}
         {normalizedView === 'marshal-portal' && (
           <CodeScrietAuthGate requireAuth={true} onNavigate={navigateTo}>
-            <MarshalPortalPage onNavigate={navigateTo} />
+            {currentRole === 'MARSHAL' || isAdminVerified() ? (
+              <MarshalPortalPage onNavigate={navigateTo} />
+            ) : (
+              <TeamDashboardPage onNavigate={navigateTo} />
+            )}
           </CodeScrietAuthGate>
         )}
         {normalizedView === 'auction' && (
@@ -248,11 +296,23 @@ const SimulationApp: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 text-stone-400">
-            <button onClick={() => navigateTo('landing')} className="hover:text-orange-500">
+            <button
+              onClick={() => navigateTo(isParticipantActive ? 'team-dashboard' : 'landing')}
+              className="hover:text-orange-500"
+            >
               ZERO → ONE Platform
             </button>
             <span>•</span>
-            <button onClick={() => navigateTo('events-directory')} className="hover:text-orange-500">
+            <button
+              onClick={() => {
+                if (isParticipantActive) {
+                  window.open('https://codescriet.dev/events', '_blank');
+                } else {
+                  navigateTo('events-directory');
+                }
+              }}
+              className="hover:text-orange-500"
+            >
               codescriet.dev/events
             </button>
             <span>•</span>

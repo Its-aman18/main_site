@@ -291,10 +291,8 @@ export const eventOpsApi = {
     request<{ round: CompetitionRound }>(`/competition/${roundId}/finish`, { method: 'PATCH', token }),
   saveCompetitionCode: (roundId: string, data: { code: string }, token: string) =>
     request<{ savedAt: string; serverTime: string }>(`/competition/${roundId}/save`, { method: 'POST', body: JSON.stringify(data), token }),
-  // No web client for the IMAGE_TARGET final submit: it's posted directly from the
-  // playground build editor (apps/playground CompetitionPage), and DSA rounds submit
-  // through the Problems judge (`/api/problems/:id/submit`, CONTEST context). The old
-  // `submitCompetitionCode` here had no caller and was removed.
+  submitCompetitionCode: (roundId: string, data: { code: string }, token: string) =>
+    request<{ submission: CompetitionSubmission }>(`/competition/${roundId}/submit`, { method: 'POST', body: JSON.stringify(data), token }),
   getMyCompetitionSubmission: (roundId: string, token: string) =>
     request<{
       submission: (CompetitionSubmission & { submittedAt: string }) | null;
